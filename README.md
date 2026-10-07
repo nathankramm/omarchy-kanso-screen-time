@@ -5,13 +5,18 @@ Kanso (簡素): simplicity by removing clutter. Screen time for Omarchy, kept qu
 <p>
   <img src="docs/glance.png" alt="The glance: today's total, a bar of shares and the top three apps" width="460">
 </p>
-<p>
-  <img src="docs/day.png" alt="The Day page: the day by hour and its apps" width="300">
-  <img src="docs/week.png" alt="The Week page: a bar per day against the average day" width="300">
-  <img src="docs/year.png" alt="The Year page: a bar per month and the time per day" width="300">
-</p>
+<table>
+  <tr>
+    <td><img src="docs/day.png" alt="The Day page: the day by hour and its apps" width="400"></td>
+    <td><img src="docs/week.png" alt="The Week page: a bar per day against the average day" width="400"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/month.png" alt="The Month page: a bar per day of the month" width="400"></td>
+    <td><img src="docs/year.png" alt="The Year page: a bar per month and the time per day" width="400"></td>
+  </tr>
+</table>
 
-*Screenshots are rendered from made-up test data.*
+_Screenshots are rendered from made-up test data._
 
 Per-app screen time for Omarchy, recorded in the
 background into one local file and shown in a hover card on the bar.
@@ -60,6 +65,7 @@ Started as a fork of
   The rows always add up to the total. **‹ ›** step back to any earlier day,
   week, month or year, as far as your history goes. Row colours come from your Omarchy theme. The card never
   scrolls and never changes size.
+
 - **Reports**: right-click the glyph for Omarchy's own menu.
   - **Copy report**: the whole picture as Markdown, to the clipboard.
   - **Save report**: `~/Documents/screen-time-YYYY-MM-DD.md`, replacing
@@ -68,6 +74,7 @@ Started as a fork of
   A notification confirms each, or carries the error; a failed save writes
   nothing. The same from a terminal: `omarchy-shell io.github.nathankramm.kanso copy` and
   `omarchy-shell io.github.nathankramm.kanso save`.
+
 - **Answers questions in the terminal**: `screen-time report` with `--day`,
   `--week`, `--month` or `--year` (add `--by-day` to a month or year for every
   day and its apps), as text, `--json` or `--md`. Every app is listed, hidden
@@ -76,8 +83,22 @@ Started as a fork of
   and month. More in AGENTS.md, "How to
   audit screen time".
 - **Names** come from `~/.config/omarchy/screen-time/names.json`: rename, hide
-  (into Other) or ignore (stop counting) an app by its stored key. `screen-time
-  keys` lists the keys. Labels are display-only; history is never rewritten.
+  (into Other) or ignore (stop counting) an app by its stored key.
+  `screen-time keys` lists the keys, each with the label it shows now and
+  where that label comes from. Labels are display-only; history is never rewritten.
+
+  ```json
+  {
+    "rename": { "claude": "Claude Code" },
+    "hide": ["bash"],
+    "ignore": ["steam_app_123456"]
+  }
+  ```
+
+  `rename` maps a stored key to the label to show (keys given the same label
+  share one row); `hide` folds apps into Other without changing the total;
+  `ignore` stops counting an app from then on (time already recorded stays).
+  Every field is optional. Renames and hides show within a minute.
 
 ## Privacy
 
@@ -102,7 +123,10 @@ Everything lives in `~/.config/omarchy/screen-time/`. The tracker writes
     "2026-08-16": {
       "total": 490875,
       "apps": { "zen": 313349, "claude": 148706 },
-      "hours": [0, 0, 0, 0, 0, 0, 0, 0, 0, 120000, 370875, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      "hours": [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 120000, 370875, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0
+      ]
     }
   },
   "months": {},
@@ -140,10 +164,13 @@ omarchy plugin enable io.github.nathankramm.kanso
 omarchy restart shell
 ```
 
+`omarchy plugin add` asks a few questions first (trust this repo, clone it, enable it now, which bar section); if you enabled it there, skip the `enable` command.
+
 It lands in `~/.config/omarchy/plugins/io.github.nathankramm.kanso/` and
 starts recording at once. For the `screen-time` command in your terminal:
 
 ```bash
+mkdir -p ~/.local/bin
 ln -sfn ~/.config/omarchy/plugins/io.github.nathankramm.kanso/python/screen_time.py ~/.local/bin/screen-time
 ```
 
@@ -165,8 +192,20 @@ omarchy restart shell
 ```
 
 To go back: `omarchy plugin disable io.github.nathankramm.kanso`, then
-`omarchy plugin enable agx.screen-time` and restart the shell. The history
-format is unchanged, so agx reads everything Kanso recorded.
+`omarchy plugin enable agx.screen-time` and restart the shell. agx reads every
+day in history.json (the last 365) with its totals and apps; it doesn't read
+`archive/` (days Kanso moved there after a year) or today's hourly data.
+
+## Uninstall
+
+```bash
+omarchy plugin remove io.github.nathankramm.kanso
+rm ~/.local/bin/screen-time
+omarchy restart shell
+```
+
+`omarchy plugin remove` asks before it deletes the plugin's folder. Your
+history in `~/.config/omarchy/screen-time/` stays until you delete it.
 
 ## Development
 

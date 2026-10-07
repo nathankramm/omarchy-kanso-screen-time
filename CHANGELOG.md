@@ -17,7 +17,7 @@ before enabling Kanso: two trackers must never write one history.json.
 - A hover card in your bar's style: today's total, how today compares with your
   average day, the day by hour (24 bars, 12 AM to 12 AM, this hour highlighted),
   and your top apps plus Other, adding up to the total. Hover the glyph for a short glance; click it (or
-  "Details ›") for the full card, with Day · Week · Year at its foot.
+  "Details ›") for the full card, with Day · Week · Month · Year at its foot.
 - A Week page: the week's total and dates, the week against your average week, a bar for each day with today highlighted, and the week's
   top apps plus Other.
 - A Month page in the same layout: the month's total, the month against your
@@ -71,7 +71,7 @@ before enabling Kanso: two trackers must never write one history.json.
   adjusted until each reads clearly on the card. They follow a theme switch
   within a minute. Without a usable theme, a colour-blind-safe set is used.
 - Colours stay readable on light and dark themes alike: secondary text, chart
-  bars and the Day · Week · Year switch.
+  bars and the Day · Week · Month · Year switch.
 - Apps get readable names without any setup: from your installed apps' own
   names (their desktop entries), a few built-ins (`claude` reads Claude Code,
   a shell prompt reads Terminal), then a tidy fallback (a web app's host, the

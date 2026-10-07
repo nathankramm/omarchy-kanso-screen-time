@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.nathankramm.kanso",
+  "name": "Kanso Screen Time",
+  "version": "0.9.0",
+  "author": "nathankramm",
+  "description": "Screen time for Omarchy, kept quietly: per-app, terminal-aware, totals kept forever. Started as a fork of agx's Screen Time.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "qml/Service.qml",
+    "barWidget": "qml/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Kanso Screen Time",
+    "description": "Daily screen time per app",
+    "category": "Wellbeing",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

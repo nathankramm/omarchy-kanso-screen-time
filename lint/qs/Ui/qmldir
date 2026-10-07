@@ -1,0 +1,5 @@
+module qs.Ui
+BarWidget 1.0 BarWidget.qml
+WidgetButton 1.0 WidgetButton.qml
+OpticalGlyph 1.0 OpticalGlyph.qml
+PopupCard 1.0 PopupCard.qml

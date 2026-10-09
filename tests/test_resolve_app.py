@@ -285,7 +285,7 @@ class TerminalSessionTests(unittest.TestCase):
     def test_sudo_with_its_own_pty_still_resolves(self):
         self.world.add(9_001900, "foot", 1)
         self.shell(9_001910, 9_001900, 34830, 9_001920, fg_comm="sudo")
-        self.shell(9_001925, 9_001920, 34831, 9_001925, comm="apt")  # sudo's use_pty
+        self.shell(9_001925, 9_001920, 34831, 9_001925, comm="apt")  # helper's pty
         self.assertEqual(r._resolve_terminal_foreground(9_001900), "sudo")
 
 

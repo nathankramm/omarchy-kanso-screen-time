@@ -202,8 +202,8 @@ def _tty_sessions(terminal_pid):
     """The pty sessions a terminal window hosts: a bounded BFS below it for
     descendants owning a pty (a tty and a foreground group), not descending
     into one once found, so a program's own nested pty (nvim's :terminal, a
-    sudo pty) is not mistaken for another tab. Returns their proc_stats, one
-    per distinct tty.
+    privileged helper's pty) is not mistaken for another tab. Returns their
+    proc_stats, one per distinct tty.
 
     Terminals like foot spawn their shell with forkpty, so the pty is the
     child's controlling terminal, not the terminal's own. A terminal process

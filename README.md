@@ -34,6 +34,8 @@ Started as a fork of
   suspend. Time before the screensaver starts still counts (about 150 s per
   time away with the default idle settings), and so does time while an app holds an idle inhibitor
   or Stay awake is on.
+  Kanso counts while the screen is on: if you keep it awake (Stay awake) and
+  walk away, that time counts, so lock the screen or close the lid when you leave.
 - **Shows** an hourglass glyph in the bar: no number, no settings. Hover it for
   a glance at today (total, a bar of shares, the top three apps). Click it for
   the full card, with **Day · Week · Month · Year** at its foot:
@@ -155,8 +157,11 @@ Everything lives in `~/.config/omarchy/screen-time/`. The tracker writes
 
 ## Install
 
-Needs Omarchy with its shell plugins (`omarchy plugin`) and `python3`
-(stdlib only; nothing to install).
+**Requirements:** Omarchy 4.0 or later (the version that added shell plugins,
+`omarchy plugin`) and Python 3.11 or later at `/usr/bin/python3` (stdlib only;
+nothing to install). A stock Omarchy has both. Kanso always runs the system
+Python, so a different `python3` earlier on your PATH (mise, pyenv, conda)
+doesn't matter.
 
 ```bash
 omarchy plugin add https://github.com/nathankramm/omarchy-kanso-screen-time.git
@@ -181,7 +186,20 @@ ln -sfn ~/.config/omarchy/plugins/io.github.nathankramm.kanso/python/screen_time
 
 Kanso keeps its data in the same folder, `~/.config/omarchy/screen-time/`,
 so the history `agx.screen-time` recorded carries over and keeps counting.
-Disable it first (two trackers must never write one history.json), and back up ~/.config/omarchy/screen-time/:
+Disable it first (two trackers must never write one history.json), and back up ~/.config/omarchy/screen-time/.
+
+**What doesn't carry over:** agx's ignore list and app aliases (and its daily
+goal, which Kanso doesn't have). agx kept them in its bar entry in
+`~/.config/omarchy/shell.json`, and disabling agx removes that entry, so copy
+them out first:
+
+```bash
+jq '.. | objects | select(.id? == "agx.screen-time") | {ignoredApps, appAliases}' ~/.config/omarchy/shell.json
+```
+
+Then redo them in `~/.config/omarchy/screen-time/names.json` (see Names
+above): each ignored app goes in `"ignore"`, and each alias `"from": "to"`
+becomes `"rename": { "from": "to" }`.
 
 ```bash
 cp -a ~/.config/omarchy/screen-time ~/.config/omarchy/screen-time-backup-$(date +%Y%m%d-%H%M%S)

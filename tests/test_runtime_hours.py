@@ -44,8 +44,9 @@ def hours(**at):
     return h
 
 
-@unittest.skipUnless(shutil.which("quickshell"), "quickshell is not installed")
-class RuntimeHoursTests(unittest.TestCase):
+class RuntimeHarness(unittest.TestCase):
+    """One throwaway HOME, history file and harness config per test."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         t = self.tmp.name
@@ -68,7 +69,7 @@ class RuntimeHoursTests(unittest.TestCase):
         with open(self.history) as f:
             return json.load(f)["days"]
 
-    def run_tracker(self, start, end):
+    def run_tracker(self, start, end, expect_write=True):
         """One shell lifetime: load, accrue [start, end) to the editor, save."""
         t = self.tmp.name
         env = {k: v for k, v in os.environ.items() if k not in DROP}
@@ -78,10 +79,16 @@ class RuntimeHoursTests(unittest.TestCase):
         p = subprocess.run(["quickshell", "--no-color", "-p", self.cfg], capture_output=True, text=True,
                            env=env, timeout=60, check=False)  # fmt: skip
         log = p.stdout + p.stderr
+        if not expect_write:
+            self.assertNotIn("ST-WROTE", log)
+            return log, None
         self.assertIn("ST-WROTE", log, log[-2000:])
         probe = json.loads(log.split("ST-PROBE ", 1)[1].splitlines()[0])
         return log, probe
 
+
+@unittest.skipUnless(shutil.which("quickshell"), "quickshell is not installed")
+class RuntimeHoursTests(RuntimeHarness):
     def test_hours_survive_load_save_and_a_restart_exactly(self):
         yesterday = {
             "total": 3 * HOUR,
@@ -134,6 +141,65 @@ class RuntimeHoursTests(unittest.TestCase):
         self.assertNotIn("malformed", log)
         self.assertFalse(probe["copied"])  # nothing to copy: today starts its hours now
         self.assertEqual(self.read()[TODAY]["hours"], hours(h10=5 * MIN))
+
+
+@unittest.skipUnless(shutil.which("quickshell"), "quickshell is not installed")
+class RuntimeSchemaTests(RuntimeHarness):
+    """#3, through the real runtime: history.json's version round-trips, a day's
+    unknown fields and `ext` survive a save and a restart, and a file this
+    version can't keep whole is never written."""
+
+    def raw_write(self, doc):
+        with open(self.history, "w") as f:
+            json.dump(doc, f, indent=4)
+        with open(self.history, "rb") as f:
+            return f.read()
+
+    def test_schema_written_unknown_day_fields_and_ext_kept_across_a_restart(self):
+        self.raw_write({
+            "days": {"2026-10-06": {"total": HOUR, "apps": {"editor": HOUR}, "note": "yesterday"},
+                     TODAY: {"total": 10 * MIN, "apps": {"editor": 10 * MIN}, "hours": hours(h9=10 * MIN), "tags": ["work"]}},
+            "months": {}, "years": {}, "ext": {"future": {"x": 1}},
+        })  # fmt: skip
+        for start, end in (
+            ("2026-10-07 10:00", "2026-10-07 10:05"),
+            ("2026-10-07 10:10", "2026-10-07 10:20"),
+        ):
+            log, _ = self.run_tracker(start, end)
+            self.assertNotIn("malformed", log)
+            with open(self.history) as f:
+                doc = json.load(f)
+            self.assertEqual(doc["schema"], 1)  # written on the first save
+            self.assertEqual(doc["ext"], {"future": {"x": 1}})
+            self.assertEqual(doc["days"]["2026-10-06"]["note"], "yesterday")
+            self.assertEqual(
+                doc["days"][TODAY]["tags"], ["work"]
+            )  # kept through accrual
+        self.assertEqual(doc["days"][TODAY]["total"], 25 * MIN)
+
+    def test_a_newer_schema_is_never_written(self):
+        before = self.raw_write(
+            {"schema": 2, "days": {TODAY: {"total": HOUR, "apps": {"editor": HOUR}}}}
+        )
+        log, _ = self.run_tracker(
+            "2026-10-07 10:00", "2026-10-07 10:05", expect_write=False
+        )
+        self.assertIn("ST-READONLY history.json is from a newer Kanso (schema 2)", log)
+        with open(self.history, "rb") as f:
+            self.assertEqual(f.read(), before)  # byte for byte
+
+    def test_unknown_top_level_keys_are_never_dropped(self):
+        before = self.raw_write(
+            {"days": {}, "months": {}, "years": {}, "goals": {"daily": 6}}
+        )
+        log, _ = self.run_tracker(
+            "2026-10-07 10:00", "2026-10-07 10:05", expect_write=False
+        )
+        self.assertIn(
+            "ST-READONLY history.json has fields this Kanso can't keep (goals)", log
+        )
+        with open(self.history, "rb") as f:
+            self.assertEqual(f.read(), before)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,19 @@ BarWidget {
     readonly property var service: bar && bar.shell ? bar.shell.serviceFor("io.github.nathankramm.kanso") : null
     readonly property string glyph: "󰔟"
     readonly property var card: service ? service.card : null
+    // #1: the Service code version this widget was built with (Service.qml
+    // serviceVersion). An update reloads this widget but keeps the old Service
+    // running (keepLoaded) until the shell restarts: tracking runs old code,
+    // and an old Model rejects a newer engine's card and keeps showing stale
+    // numbers. Say so instead of staying silent. 0.9.0's Service has no
+    // serviceVersion (undefined), so it reads as older.
+    readonly property int expectedServiceVersion: 2
+    readonly property bool serviceStale: root.service !== null && root.service.serviceVersion !== root.expectedServiceVersion
+    // #3: the Service won't write a history.json it can't keep whole.
+    readonly property bool historyBlocked: root.service !== null && root.service.historyReadOnly === true
+    // One muted line, in the glance's footer and the pages' footer.
+    readonly property string noticeShort: root.serviceStale ? "Restart the shell to finish updating" : (root.historyBlocked ? "Not saving history: update Kanso" : "")
+    readonly property string noticeLong: root.serviceStale ? "Run omarchy restart shell to finish updating" : (root.historyBlocked ? "Not saving history.json: update Kanso" : "")
     // Static UI text, shown only while there is no good card yet (D14).
     readonly property string fallbackText: {
         if (!root.service)
@@ -136,6 +149,8 @@ BarWidget {
             id: hoverCard
             doc: root.card
             fallbackText: root.card ? "" : root.fallbackText
+            notice: root.noticeShort
+            noticeDetail: root.noticeLong
             foreground: Color.popups.text
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             shown: root.pager.shown
@@ -164,7 +179,7 @@ BarWidget {
             root.pageFinished("");
             return;
         }
-        pageProc.command = ["timeout", "20", "python3", root.service.enginePath, "card", "--page", Pager.engineKind(request.page) + ":" + request.key];
+        pageProc.command = ["timeout", "20", "/usr/bin/python3", root.service.enginePath, "card", "--page", Pager.engineKind(request.page) + ":" + request.key];
         pageProc.running = true;
     }
 
@@ -242,6 +257,8 @@ BarWidget {
                 out.shown[Pager.PAGES[i]] = shown ? shown.key : "";
             }
             out.page_failed = root.pager.failed;
+            out.widget_expects_service = root.expectedServiceVersion;
+            out.notice = root.noticeShort;
             out.page_running = pageProc.running;
             return JSON.stringify(out);
         }

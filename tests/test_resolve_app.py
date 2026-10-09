@@ -205,6 +205,90 @@ class TerminalResolutionTests(unittest.TestCase):
         self.assertIsNone(r._resolve_terminal_foreground(700))
 
 
+class TerminalSessionTests(unittest.TestCase):
+    """#2: one window per process resolves its program; a process hosting
+    several ptys (tabs, splits, windows) is never guessed: None, so the time
+    counts as the terminal. Omarchy offers alacritty, foot (the default),
+    ghostty and kitty (omarchy-menu.jsonc setup.default.terminal.*)."""
+
+    # pids above the kernel's pid_max (4194304), so proc_name can never read a
+    # real process's /proc entry
+
+    def setUp(self):
+        self.world = FakeProc()
+        self.world.install(self)
+
+    def tearDown(self):
+        FakeProc.restore(self)
+
+    def shell(self, pid, ppid, tty, fg, comm="bash", fg_comm=None):
+        """A shell on its own pty whose foreground group is `fg`."""
+        self.world.add(pid, comm, ppid, ttynr=tty, tpgid=fg)
+        if fg_comm:
+            self.world.add(fg, fg_comm, pid, ttynr=tty, tpgid=fg)
+
+    def test_foot_the_default_one_window_per_process(self):
+        self.world.add(9_001000, "foot", 1)
+        self.shell(9_001010, 9_001000, 34817, 9_001020, fg_comm="claude")
+        self.assertEqual(r._resolve_terminal_foreground(9_001000), "claude")
+
+    def test_foot_server_two_windows_is_the_terminal(self):
+        self.world.add(9_001100, "foot", 1)  # foot --server hosts every footclient
+        self.shell(9_001110, 9_001100, 34817, 9_001120, fg_comm="nvim")
+        self.shell(9_001130, 9_001100, 34818, 9_001130)
+        self.assertIsNone(r._resolve_terminal_foreground(9_001100))
+
+    def test_alacritty_one_window(self):
+        self.world.add(9_001200, "alacritty", 1)
+        self.shell(9_001210, 9_001200, 34819, 9_001220, comm="zsh", fg_comm="htop")
+        self.assertEqual(r._resolve_terminal_foreground(9_001200), "htop")
+
+    def test_alacritty_msg_create_window_is_the_terminal(self):
+        self.world.add(9_001300, "alacritty", 1)
+        self.shell(9_001310, 9_001300, 34820, 9_001320, fg_comm="claude")
+        self.shell(9_001330, 9_001300, 34821, 9_001340, fg_comm="nvim")
+        self.assertIsNone(r._resolve_terminal_foreground(9_001300))
+
+    def test_ghostty_one_window_through_login(self):
+        self.world.add(9_001400, "ghostty", 1)
+        self.world.add(9_001410, "login", 9_001400, ttynr=34822, tpgid=9_001430)
+        self.shell(9_001420, 9_001410, 34822, 9_001430, fg_comm="nvim")
+        self.assertEqual(r._resolve_terminal_foreground(9_001400), "nvim")
+
+    def test_ghostty_tabs_or_single_instance_windows_are_the_terminal(self):
+        self.world.add(9_001500, "ghostty", 1)
+        self.world.add(9_001510, "login", 9_001500, ttynr=34823, tpgid=9_001520)
+        self.shell(9_001520, 9_001510, 34823, 9_001520)
+        self.world.add(9_001530, "login", 9_001500, ttynr=34824, tpgid=9_001550)
+        self.shell(9_001540, 9_001530, 34824, 9_001550, fg_comm="claude")
+        self.assertIsNone(r._resolve_terminal_foreground(9_001500))
+
+    def test_kitty_one_window_with_its_prewarm_child(self):
+        self.world.add(9_001600, "kitty", 1)
+        self.world.add(9_001605, "kitty", 9_001600)  # prewarm: no tty
+        self.shell(9_001610, 9_001600, 34825, 9_001620, fg_comm="nvim")
+        self.assertEqual(r._resolve_terminal_foreground(9_001600), "nvim")
+
+    def test_kitty_tabs_or_splits_are_the_terminal(self):
+        self.world.add(9_001700, "kitty", 1)
+        self.shell(9_001710, 9_001700, 34826, 9_001710)
+        self.shell(9_001720, 9_001700, 34827, 9_001730, fg_comm="claude")
+        self.assertIsNone(r._resolve_terminal_foreground(9_001700))
+
+    def test_a_programs_own_nested_pty_is_not_another_tab(self):
+        # nvim's :terminal opens a pty below the shell; one window still
+        self.world.add(9_001800, "foot", 1)
+        self.shell(9_001810, 9_001800, 34828, 9_001820, fg_comm="nvim")
+        self.shell(9_001830, 9_001820, 34829, 9_001830)  # the :terminal's shell
+        self.assertEqual(r._resolve_terminal_foreground(9_001800), "nvim")
+
+    def test_sudo_with_its_own_pty_still_resolves(self):
+        self.world.add(9_001900, "foot", 1)
+        self.shell(9_001910, 9_001900, 34830, 9_001920, fg_comm="sudo")
+        self.shell(9_001925, 9_001920, 34831, 9_001925, comm="apt")  # sudo's use_pty
+        self.assertEqual(r._resolve_terminal_foreground(9_001900), "sudo")
+
+
 class SteamTitleTests(unittest.TestCase):
     """Steam window classes resolve to game titles from local appmanifests."""
 

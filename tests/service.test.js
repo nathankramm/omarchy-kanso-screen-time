@@ -108,8 +108,24 @@ test("resume after pause is deferred and re-validated", () => {
   assert(ssStart && ssStart[0].includes("root.cancelResume()"))
 })
 
-test("warns once instead of failing silently when services never appear", () => {
-  assert.match(service, /services unavailable after 10s/)
+test("the service lookup stops after 40 tries and says so once (#8)", () => {
+  // a third-party plugin's serviceFor is scoped to its own id: never resolves
+  assert.match(service, /services not reachable from a plugin/)
+  assert.match(
+    service,
+    /running: root\.ready && !root\.serviceLookupDone && \(!root\.lockService \|\| !root\.idleService\)/,
+  )
+  assert.match(
+    service,
+    /if \(attempts >= 40\) \{\n\s+root\.serviceLookupDone = true;/,
+  )
+})
+
+test("any session lock counts: the shell's isLocked, then omarchy-hyprland-session-locked (#4)", () => {
+  assert.match(
+    service,
+    /cur=\$\(omarchy-shell lock isLocked 2>\/dev\/null\); " \+ "if \[ \\"\$cur\\" = false \] && omarchy-hyprland-session-locked 2>\/dev\/null; then cur=true; fi; "/,
+  )
 })
 
 test("ignored apps are filtered; names are stored canonical, never renamed", () => {
@@ -217,4 +233,32 @@ test("D42: the save writes today's record whole and a restart copies its hours",
     svc,
     /root\.today = prev && typeof prev === "object" \? Model\.copyDay\(prev\) : Model\.newDay\(\);/,
   )
+})
+
+test("the engine, archiver, resolver and report run the system Python (#10)", () => {
+  assert.match(
+    service,
+    /readonly property string python: "\/usr\/bin\/python3"/,
+  )
+  const fs = require("node:fs")
+  const path = require("node:path")
+  const root = path.join(__dirname, "..")
+  for (const f of [
+    "qml/Service.qml",
+    "qml/BarWidget.qml",
+    "bin/screen-time-report",
+  ]) {
+    const src = fs
+      .readFileSync(path.join(root, f), "utf8")
+      .split("\n")
+      .filter((line) => !/^\s*(\/\/|#)/.test(line))
+      .join("\n")
+    // a bare `python3` call would take the first one on PATH (a mise/pyenv shim)
+    assert.doesNotMatch(src, /(\["|"|\s)python3["\s]/, f)
+  }
+  const report = fs.readFileSync(
+    path.join(root, "bin/screen-time-report"),
+    "utf8",
+  )
+  assert.match(report, /python=\$\{SCREEN_TIME_PYTHON:-\/usr\/bin\/python3\}/)
 })

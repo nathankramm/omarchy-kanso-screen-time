@@ -76,7 +76,12 @@ function addSpan(day, app, start, end, model) {
     cursor = stop
     guard++
   }
-  return { total: day.total + dur, apps: apps, hours: hours }
+  // #3: a day's other fields ride along (copied, never mutated)
+  return Object.assign({}, day, {
+    total: day.total + dur,
+    apps: apps,
+    hours: hours,
+  })
 }
 
 // Unmirrored delta of live day over history mirror, floored at zero.

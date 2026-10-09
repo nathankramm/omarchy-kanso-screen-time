@@ -80,7 +80,7 @@ test("D14/V1: a hover spawns nothing; the bar runs the report (D33) and one page
   assert.equal((bar.match(/\.running = true/g) || []).length, 1)
   assert.match(
     bar,
-    /pageProc\.command = \["timeout", "20", "python3", root\.service\.enginePath, "card", "--page", Pager\.engineKind\(request\.page\) \+ ":" \+ request\.key\];\n\s+pageProc\.running = true;/,
+    /pageProc\.command = \["timeout", "20", "\/usr\/bin\/python3", root\.service\.enginePath, "card", "--page", Pager\.engineKind\(request\.page\) \+ ":" \+ request\.key\];\n\s+pageProc\.running = true;/,
   )
   assert.match(bar, /onExited: root\.pageFinished\(pageOut\.text\)/)
   // runPage is reached from an arrow's request and from a finished run's queue only
@@ -128,7 +128,7 @@ test("D14/V1: a hover spawns nothing; the bar runs the report (D33) and one page
   assert(proc, "engineProc exists")
   assert(
     proc[0].includes(
-      'command: ["timeout", "20", "python3", root.enginePath, "card"]',
+      'command: ["timeout", "20", root.python, root.enginePath, "card"]',
     ),
   )
   assert(proc[0].includes("onExited: root.applyEngineOutput(engineOut.text)"))

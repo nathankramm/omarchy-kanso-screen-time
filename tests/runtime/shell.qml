@@ -21,7 +21,24 @@ ShellRoot {
     property var today: null
 
     function onHistoryLoaded() {
-        // Service.qml onHistoryLoaded, verbatim in effect
+        // Service.qml onHistoryLoaded, verbatim in effect. #3: never write a file
+        // this version can't keep whole; older schemas step through migrateHistory.
+        var block = Model.historyWriteBlock(Model.parseHistoryText(historyFile.text()));
+        if (block !== "") {
+            console.log("ST-READONLY " + block);
+            quitTimer.start();
+            return;
+        }
+        if (historyAdapter.schema < Model.HISTORY_SCHEMA) {
+            var migrated = Model.migrateHistory({
+                "days": historyAdapter.days,
+                "months": historyAdapter.months,
+                "years": historyAdapter.years,
+                "ext": historyAdapter.ext
+            }, historyAdapter.schema);
+            if (migrated.days !== historyAdapter.days)
+                historyAdapter.days = migrated.days;
+        }
         var clean = Model.sanitizeHistory(historyAdapter.days, historyAdapter.months, historyAdapter.years);
         if (clean.days !== historyAdapter.days || clean.months !== historyAdapter.months || clean.years !== historyAdapter.years)
             console.warn("kanso: history.json has malformed sections; ignoring them");
@@ -49,6 +66,8 @@ ShellRoot {
         // Service.qml persist: today into a fresh mirror, then the adapter write
         var merged = Object.assign({}, root.days);
         merged[root.todayKey] = root.today;
+        if (historyAdapter.schema !== Model.HISTORY_SCHEMA)
+            historyAdapter.schema = Model.HISTORY_SCHEMA;
         historyAdapter.days = merged;
         historyFile.writeAdapter();
         console.log("ST-WROTE");
@@ -76,9 +95,11 @@ ShellRoot {
 
         JsonAdapter {
             id: historyAdapter
+            property int schema: 0
             property var days: ({})
             property var months: ({})
             property var years: ({})
+            property var ext: ({})
         }
     }
 }

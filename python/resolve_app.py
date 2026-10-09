@@ -198,16 +198,21 @@ def steam_title_for_class(class_name):
     return None
 
 
-def _find_tty_session(terminal_pid):
-    """Bounded DFS below the terminal for a descendant owning a pty.
+def _tty_sessions(terminal_pid):
+    """The pty sessions a terminal window hosts: a bounded BFS below it for
+    descendants owning a pty (a tty and a foreground group), not descending
+    into one once found, so a program's own nested pty (nvim's :terminal, a
+    sudo pty) is not mistaken for another tab. Returns their proc_stats, one
+    per distinct tty.
 
-    Terminals like foot spawn their shell with forkpty, so the pty is
-    the child's controlling terminal, not the terminal's own.  Returns
-    that descendant's proc_stat (its ``tpgid`` is the foreground group),
-    or None when no descendant owns a tty.
+    Terminals like foot spawn their shell with forkpty, so the pty is the
+    child's controlling terminal, not the terminal's own. A terminal process
+    hosting several windows, tabs or splits (Ghostty, kitty, Alacritty's
+    `msg create-window`, foot --server) shows one session per pty.
     """
     frontier = deque((pid, 1) for pid in _children(terminal_pid))
     seen = set()
+    sessions = {}
     while frontier:
         pid, depth = frontier.popleft()
         if pid in seen or depth > _MAX_TTY_SEARCH_DEPTH:
@@ -217,10 +222,11 @@ def _find_tty_session(terminal_pid):
         if stat is None:
             continue
         if stat["ttynr"] and stat["tpgid"] > 0:
-            return stat
+            sessions.setdefault(stat["ttynr"], stat)
+            continue
         for child in _children(pid):
             frontier.append((child, depth + 1))
-    return None
+    return list(sessions.values())
 
 
 def _resolve_terminal_foreground(terminal_pid):
@@ -238,10 +244,15 @@ def _resolve_terminal_foreground(terminal_pid):
     if stat is None:
         return None
 
+    sessions = _tty_sessions(terminal_pid)
+    if len(sessions) > 1:
+        # Several tabs, splits or windows in one process: which one is
+        # focused can't be read from /proc, so never guess. None counts the
+        # time as the terminal itself.
+        return None
     tpgid = stat["tpgid"]
     if tpgid <= 0 or tpgid == terminal_pid:
-        tty_stat = _find_tty_session(terminal_pid)
-        tpgid = tty_stat["tpgid"] if tty_stat else 0
+        tpgid = sessions[0]["tpgid"] if sessions else 0
     if tpgid <= 0:
         return None
 

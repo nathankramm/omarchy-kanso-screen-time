@@ -24,6 +24,10 @@ Item {
 
     property var doc: null                 // the engine's card, or null
     property string fallbackText: ""       // one line, only while there is no card
+    // #1/#3: one muted line ("Restart the shell to finish updating", "Not saving
+    // history: update Kanso"), in the glance's footer and the pages' footer
+    property string notice: ""
+    property string noticeDetail: ""
     property color foreground: Color.foreground
     property color surface: Color.popups.background   // what the card is painted on
     property string fontFamily: Style.font.family
@@ -327,15 +331,16 @@ Item {
     // The detail pages' footer: all-time on the left (or, when this tab's latest
     // page run failed, one quiet line in its place) · the switch on the right.
     component PageFooter: Item {
+        id: pageFooter
         width: parent ? parent.width : hc.cardWidth
         height: Math.ceil(captionMetrics.height)
 
         AllTimeLine {
-            visible: hc.failedPage !== hc.page
+            visible: hc.failedPage !== hc.page && hc.noticeDetail === ""
         }
 
         Text {
-            visible: hc.live && hc.failedPage === hc.page
+            visible: hc.live && hc.failedPage === hc.page && hc.noticeDetail === ""
             textFormat: Text.PlainText
             text: "Couldn't load that page"
             color: hc.muted
@@ -343,7 +348,20 @@ Item {
             font.pixelSize: Style.font.caption
         }
 
+        // #1/#3: the notice takes the all-time line's place; the card's size holds
+        Text {
+            visible: hc.noticeDetail !== ""
+            width: pageSwitch.x - Style.space(8)
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: hc.noticeDetail
+            color: hc.muted
+            font.family: hc.fontFamily
+            font.pixelSize: Style.font.caption
+        }
+
         PageSwitch {
+            id: pageSwitch
             anchors.right: parent.right
         }
     }
@@ -738,10 +756,22 @@ Item {
             color: hc.live ? hc.faint(0.18) : "transparent"
         }
 
-        // today only: the footer holds just the way to the detail
+        // today only: the footer holds just the way to the detail (and, #1/#3, the
+        // notice on its left)
         Item {
             width: parent.width
             height: Math.ceil(captionMetrics.height)
+
+            Text {
+                visible: hc.notice !== ""
+                width: detailsLink.x - Style.space(8)
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: hc.notice
+                color: hc.muted
+                font.family: hc.fontFamily
+                font.pixelSize: Style.font.caption
+            }
 
             Link {
                 id: detailsLink

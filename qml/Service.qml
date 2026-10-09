@@ -17,10 +17,21 @@ Item {
 
     // Injected by omarchy-shell.
     property var shell: null
+    // #1: this file's code version. The manifest is keepLoaded, so an update
+    // reloads the bar widget but keeps this running Service (and its Model.js
+    // and State.js) until the shell restarts; the new widget compares this with
+    // the version it expects (BarWidget.qml expectedServiceVersion) and asks for
+    // a restart when they differ. 0.9.0's Service has no such property.
+    // Bump both together whenever Service.qml, Model.js or State.js change.
+    readonly property int serviceVersion: 2
     // Passed explicitly; QML JS modules don't share imports.
     readonly property var stateModel: Model
 
     readonly property string home: Quickshell.env("HOME")
+    // The system Python (Arch's `python`, which Omarchy's base pulls in), never
+    // a `python3` on PATH: a mise/pyenv/conda shim there may be older than the
+    // 3.11 the engine needs (tomllib, datetime.UTC).
+    readonly property string python: "/usr/bin/python3"
     readonly property string dataDir: home + "/.config/omarchy/screen-time"
     readonly property string historyPath: dataDir + "/history.json"
     // D20: days past keepDays, apps and all, live in archive/<year>.json
@@ -227,6 +238,9 @@ Item {
             "last_run_age_s": root.lastRunMs > 0 ? Math.round((Date.now() - root.lastRunMs) / 1000) : null,
             "card_state": root.card ? root.card.state : null,
             "card_schema": root.card ? root.card.schema : null,
+            "service_version": root.serviceVersion,
+            "history_read_only": root.historyReadOnly,
+            "history_notice": root.historyNotice,
             "stored_keys": Model.storedKeyCount(root.days),
             "ignored_apps": root.ignoredApps.length,
             "names": {
@@ -239,7 +253,7 @@ Item {
     // `timeout` bounds a hung run; the next tick starts a fresh one.
     Process {
         id: engineProc
-        command: ["timeout", "20", "python3", root.enginePath, "card"]
+        command: ["timeout", "20", root.python, root.enginePath, "card"]
         stdout: StdioCollector {
             id: engineOut
             waitForEnd: true
@@ -360,7 +374,7 @@ Item {
     // Writes wait while the corrupt-file backup runs.
     property bool backupPending: false
     function persist() {
-        if (root.startupPhase || root.backupPending)
+        if (root.startupPhase || root.backupPending || root.historyReadOnly)
             return;
         var merged = Object.assign({}, root.days);
         merged[root.todayKey] = root.today;
@@ -371,6 +385,8 @@ Item {
         if (Model.shouldArchive(roll.out, root.archiveInFlight, root.archiveFailedOn, root.todayKey))
             root.startArchive(roll.out);
         root.days = merged;
+        if (historyAdapter.schema !== Model.HISTORY_SCHEMA)
+            historyAdapter.schema = Model.HISTORY_SCHEMA;
         historyAdapter.days = merged;
     }
 
@@ -402,8 +418,14 @@ Item {
     // Failure streak; any scheduled save resets it.
     property int saveFailCount: 0
 
+    // #3: set when history.json can't be written without losing data (a newer
+    // schema, or top-level keys this version can't keep). The file is never
+    // touched; the card shows `historyNotice`.
+    property bool historyReadOnly: false
+    property string historyNotice: ""
+
     function scheduleSave() {
-        if (root.startupPhase || root.backupPending)
+        if (root.startupPhase || root.backupPending || root.historyReadOnly)
             return;
         // Start, never restart: continuous focus flapping must not defer
         // the write indefinitely past the crash window.
@@ -412,6 +434,28 @@ Item {
     }
 
     function onHistoryLoaded() {
+        // #3: never write a file this version can't keep whole.
+        var block = Model.historyWriteBlock(Model.parseHistoryText(historyFile.text()));
+        if (block !== "" && !root.historyReadOnly) {
+            root.historyReadOnly = true;
+            root.historyNotice = block + ": Kanso isn't writing to it. Update Kanso.";
+            console.warn("kanso: " + block + "; not writing history.json");
+        }
+        // #3: older schemas step up through the (so far empty) migration chain.
+        if (!root.historyReadOnly && historyAdapter.schema < Model.HISTORY_SCHEMA) {
+            var migrated = Model.migrateHistory({
+                "days": historyAdapter.days,
+                "months": historyAdapter.months,
+                "years": historyAdapter.years,
+                "ext": historyAdapter.ext
+            }, historyAdapter.schema);
+            if (migrated.days !== historyAdapter.days)
+                historyAdapter.days = migrated.days;
+            if (migrated.months !== historyAdapter.months)
+                historyAdapter.months = migrated.months;
+            if (migrated.years !== historyAdapter.years)
+                historyAdapter.years = migrated.years;
+        }
         // Non-object sections are discarded with a single warning.
         var clean = Model.sanitizeHistory(historyAdapter.days, historyAdapter.months, historyAdapter.years);
         if (clean.days !== historyAdapter.days || clean.months !== historyAdapter.months || clean.years !== historyAdapter.years)
@@ -490,9 +534,13 @@ Item {
         // name is unknown to qmllint 6.4.
         JsonAdapter {
             id: historyAdapter
+            // #3: the file's version (absent = 0 = agx 1.6.2 / Kanso 0.9's format)
+            // and a reserved bag for future top-level data; both round-trip.
+            property int schema: 0
             property var days: ({})
             property var months: ({})
             property var years: ({})
+            property var ext: ({})
         }
     }
 
@@ -502,7 +550,7 @@ Item {
         property string request: ""
         property int expected: 0
         environment: root.procEnv
-        command: ["timeout", "60", "python3", root.archiverPath]
+        command: ["timeout", "60", root.python, root.archiverPath]
         stdinEnabled: true
         onStarted: {
             write(request + "\n");
@@ -538,14 +586,14 @@ Item {
     }
 
     // Move aside non-empty files that fail to parse. The validity check
-    // uses python3 when present, but the move itself never depends on
+    // uses the system python3 (/usr/bin) when present, but the move itself never depends on
     // it: without python an unreadable file is still preserved aside
     // instead of being overwritten on the next save.
     property bool backupAttempted: false
     Process {
         id: backupProc
         environment: root.procEnv
-        command: ["bash", "-c", "f=\"$HOME/.config/omarchy/screen-time/history.json\"; if [[ -s \"$f\" ]]; then if command -v python3 >/dev/null 2>&1 && python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"$f\" 2>/dev/null; then :; else mv -f \"$f\" \"$f.corrupt-$(date +%s)\"; fi; fi"]
+        command: ["bash", "-c", "f=\"$HOME/.config/omarchy/screen-time/history.json\"; if [[ -s \"$f\" ]]; then if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"$f\" 2>/dev/null; then :; else mv -f \"$f\" \"$f.corrupt-$(date +%s)\"; fi; fi"]
         onExited: {
             // Unblock writes; queued state persists on the next tick.
             root.backupPending = false;
@@ -579,10 +627,10 @@ Item {
     }
 
     // Empty stdout falls back to rawApp; stderr is logged so breakage is visible.
-    // sh wrapper: missing python3 still exits 0 instead of stalling to watchdog.
+    // sh wrapper: a missing system python3 still exits 0 instead of stalling to watchdog.
     Process {
         id: resolverProc
-        command: ["sh", "-c", "command -v python3 >/dev/null 2>&1 && exec python3 \"$1\" || exit 0", "sh", root.resolverPath]
+        command: ["sh", "-c", "[ -x \"$0\" ] && exec \"$0\" \"$1\" || exit 0", root.python, root.resolverPath]
         stdout: StdioCollector {
             id: resolverOut
             waitForEnd: true
@@ -710,32 +758,40 @@ Item {
     }
 
     property bool serviceLookupWarned: false
+    // Omarchy scopes a third-party plugin's serviceFor to its own id, so these
+    // lookups never resolve there; 40 tries (10 s) then stop for good, instead
+    // of a 250 ms wakeup for the shell's whole life.
+    property bool serviceLookupDone: false
 
     Timer {
         id: serviceLookupTimer
         interval: 250
         repeat: true
-        running: root.ready && (!root.lockService || !root.idleService)
+        running: root.ready && !root.serviceLookupDone && (!root.lockService || !root.idleService)
         property int attempts: 0
         onTriggered: {
             root.refreshShellServices();
             attempts++;
-            if (attempts >= 40 && !root.serviceLookupWarned) {
-                // Sandboxed serviceFor may never resolve these (scoped to a
-                // plugin's own service). Warn once instead of failing silent.
-                root.serviceLookupWarned = true;
-                console.warn("kanso: omarchy.lock/omarchy.idle services unavailable after 10s; " + "falling back to a persistent lock watcher (~10s pause accuracy)");
+            if (attempts >= 40) {
+                root.serviceLookupDone = true;
+                if (!root.serviceLookupWarned) {
+                    root.serviceLookupWarned = true;
+                    console.info("kanso: omarchy.lock/omarchy.idle services not reachable from a plugin; " + "using the lock watcher (~10s pause accuracy)");
+                }
             }
         }
     }
 
     // Fallback when sandboxed lookups can't reach lock/idle services: one
     // persistent watcher checking lock every 10s, printing only on change.
-    // Stops automatically if event-driven lookups ever succeed.
+    // Stops automatically if event-driven lookups ever succeed. The shell's own
+    // lock (isLocked) is the primary signal; when it says unlocked, Omarchy's
+    // omarchy-hyprland-session-locked (exit 0 = locked) catches any other
+    // ext-session-lock (hyprlock, swaylock).
     Process {
         id: sessionStateWatcher
         environment: root.procEnv
-        command: ["bash", "-c", "ppid=$PPID; prev=''; while :; do " + "kill -0 $ppid 2>/dev/null || exit 0; " + "cur=$(omarchy-shell lock isLocked 2>/dev/null); " + "if [ -n \"$cur\" ] && [ \"$cur\" != \"$prev\" ]; then printf '%s\\n' \"$cur\"; prev=\"$cur\"; fi; " + "sleep 10; done"]
+        command: ["bash", "-c", "ppid=$PPID; prev=''; while :; do " + "kill -0 $ppid 2>/dev/null || exit 0; " + "cur=$(omarchy-shell lock isLocked 2>/dev/null); " + "if [ \"$cur\" = false ] && omarchy-hyprland-session-locked 2>/dev/null; then cur=true; fi; " + "if [ -n \"$cur\" ] && [ \"$cur\" != \"$prev\" ]; then printf '%s\\n' \"$cur\"; prev=\"$cur\"; fi; " + "sleep 10; done"]
         stdout: SplitParser {
             onRead: function (line) {
                 root.setSessionLocked(String(line).trim() === "true");
@@ -838,14 +894,20 @@ Item {
         id: saveTimer
         interval: 1500
         repeat: false
-        onTriggered: historyFile.writeAdapter()
+        onTriggered: {
+            if (!root.historyReadOnly)
+                historyFile.writeAdapter();
+        }
     }
 
     // Save-retry driver (backoff computed in onSaveFailed).
     Timer {
         id: saveRetryTimer
         repeat: false
-        onTriggered: historyFile.writeAdapter()
+        onTriggered: {
+            if (!root.historyReadOnly)
+                historyFile.writeAdapter();
+        }
     }
 
     Connections {

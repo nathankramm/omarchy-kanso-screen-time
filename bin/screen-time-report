@@ -13,6 +13,9 @@ set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 engine=${SCREEN_TIME_ENGINE:-$here/../python/screen_time.py}
+# The system Python, not a `python3` on PATH that may be an older mise/pyenv
+# shim (the engine needs 3.11+).
+python=${SCREEN_TIME_PYTHON:-/usr/bin/python3}
 
 notify() {
   omarchy-notification-send --app-name "Screen time" "$@" >/dev/null 2>&1 ||
@@ -35,7 +38,7 @@ complaint() {
 copy_report() {
   local out err
   out=$(mktemp) && err=$(mktemp) || fail "no temp file"
-  if ! python3 "$engine" report --md >"$out" 2>"$err"; then
+  if ! "$python" "$engine" report --md >"$out" 2>"$err"; then
     local msg
     msg=$(complaint "$err" "$out")
     rm -f "$out" "$err"
@@ -60,7 +63,7 @@ export_report() {
     rm -f "$tmp"
     fail "no temp file"
   }
-  if ! python3 "$engine" report --md >"$tmp" 2>"$err"; then
+  if ! "$python" "$engine" report --md >"$tmp" 2>"$err"; then
     local msg
     msg=$(complaint "$err" "$tmp")
     rm -f "$tmp" "$err"

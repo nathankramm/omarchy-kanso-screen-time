@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 # Least privilege: jobs only read the repo. Clears the
 # actions/missing-workflow-permissions code-scanning alerts.
@@ -13,11 +15,11 @@ permissions:
 jobs:
   js:
     name: JS syntax + format + tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10 # took 13 s on the first run
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Syntax check
@@ -29,11 +31,13 @@ jobs:
 
   python:
     name: Python lint + format + tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60 # the mutation run took ~38 min on a 4-core runner (11.5 min locally on 4 cores)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the mutation-run check diffs against the push's or PR's base
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install ruff
@@ -44,15 +48,33 @@ jobs:
         run: ruff format --check python/ tests/ tools/
       - name: Unit tests (resolver, engine, oracle)
         run: python3 -m unittest discover -s tests
+      # The mutation run takes ~38 min, so it runs only when the engine, the
+      # oracle or the tools change, on a tag, or by hand. An unknown base (a
+      # new branch, a force push) runs it.
+      - name: Does this change need the mutation run?
+        id: mutants
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          run=true
+          if [ "$EVENT" != workflow_dispatch ] && [ "$REF_TYPE" != tag ] &&
+            [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null &&
+            ! git diff --name-only "$BASE" HEAD -- python/ 'tests/oracle*' tools/ | grep -q .; then
+            run=false
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
       - name: Mutation run (every engine mutant must fail the oracle)
+        if: steps.mutants.outputs.run == 'true'
         run: python3 tools/mutants.py
 
   qml:
     name: QML lint + format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20 # a Qt install normally takes minutes; cap a stalled download
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Ubuntu 24.04 ships qmllint/qmlformat 6.4, which formats
       # differently and uses older warning categories than this repo's
       # tooling (6.11). Pin the same Qt release as local dev so lint and

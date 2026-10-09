@@ -5,6 +5,54 @@ of agx's Screen Time 1.6.2 (`2c7b75a`); its history up to then is in its
 repository:
 <https://github.com/ax1g/quickshell-screentime-plugin/blob/2c7b75a/CHANGELOG.md>.
 
+## 1.0.0 (2026-10-08)
+
+### Fixed
+
+- After an update, the card no longer shows stale numbers in silence. Until
+  the shell restarts, the old tracker keeps running beside the updated card;
+  the glance and every page now say "Restart the shell to finish updating"
+  (the pages name `omarchy restart shell`).
+- A terminal window with several tabs or splits (Ghostty, kitty, Alacritty's
+  extra windows, foot in server mode) is counted as the terminal instead of
+  crediting whichever tab was opened first: the focused tab can't be told
+  apart, so Kanso no longer guesses. One window per process (foot, Omarchy's
+  default) still counts the program running in it.
+- Time no longer counts while the screen is locked by another lock screen
+  (hyprlock, swaylock): besides Omarchy's own lock, any session lock the
+  compositor holds now pauses tracking.
+- A background timer that woke the shell four times a second, forever, now
+  stops after its first ten seconds.
+- The engine, the report and the app resolver always run the system Python
+  (`/usr/bin/python3`), so an older `python3` earlier on your PATH (mise,
+  pyenv, conda) no longer leaves the card empty.
+
+### Changed
+
+- history.json now records its own format version (`"schema": 1`), and fields
+  Kanso doesn't know are kept on every save instead of dropped. Kanso never
+  writes a history.json from a newer version, or one with top-level fields it
+  can't keep: the file stays untouched and the card says "Not saving history:
+  update Kanso". agx 1.6.2 and Kanso 0.9.0 still read the new file, so going
+  back keeps working.
+
+### Docs
+
+- The README states the requirements (Omarchy 4.0+, Python 3.11+) and, for
+  agx users, that the ignore list and app aliases don't carry over and how to
+  move them to names.json.
+- The README says plainly that Kanso counts while the screen is on: with Stay
+  awake on, time away from the computer counts, so lock the screen or close
+  the lid when you leave.
+
+### CI
+
+- The checkout, Node and Python setup actions moved to their Node 24 releases
+  (v7), and every job runs on Ubuntu 24.04.
+- The long mutation run now runs only when the engine, the oracle or the tools
+  change, on a release tag, or when started by hand. Every push and pull
+  request still runs the JS, QML and Python checks and tests.
+
 ## 0.9.0 (pre-release)
 
 The first release as Kanso Screen Time: plugin ID `io.github.nathankramm.kanso`.

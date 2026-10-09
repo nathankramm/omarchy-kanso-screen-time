@@ -275,10 +275,25 @@ function sanitizeDay(d) {
   var hoursOk = d.hours === undefined || isHours(d.hours)
   if (total === d.total && !appsChanged && hoursOk)
     return { day: d, changed: false }
-  var out = { total: total, apps: cleanApps }
+  // #3: fields this version doesn't know (a newer version's) are kept
+  var out = withoutCore(d)
+  out.total = total
+  out.apps = cleanApps
   var hours = hoursArray(d.hours)
   if (hours) out.hours = hours
   return { day: out, changed: true }
+}
+
+// A day's fields other than total/apps/hours (#3: kept through every rebuild).
+function withoutCore(d) {
+  var out = {}
+  for (var k in d) {
+    if (!Object.prototype.hasOwnProperty.call(d, k)) continue
+    if (k === "total" || k === "apps" || k === "hours" || k === "__proto__")
+      continue
+    out[k] = d[k]
+  }
+  return out
 }
 
 // The year archive maps "YYYY" to { "YYYY-MM-DD": ms }. Returns the input
@@ -342,9 +357,65 @@ function newDay() {
 
 // A stored day as the live today: its total, apps and (when it has them) hours.
 function copyDay(prev) {
-  var out = { total: prev.total || 0, apps: Object.assign({}, prev.apps || {}) }
+  var out = withoutCore(prev)
+  out.total = prev.total || 0
+  out.apps = Object.assign({}, prev.apps || {})
   var hours = hoursArray(prev.hours)
   if (hours) out.hours = hours
+  return out
+}
+
+// ---- history.json's own version (#3) ------------------------------------
+// The file's `schema`: absent or 0 is the format agx 1.6.2 and Kanso 0.9
+// wrote, which is schema 1's. A tracker never writes a file it can't keep
+// whole: a newer schema, or top-level keys it doesn't declare (its
+// JsonAdapter would drop them). New top-level data belongs in `ext`.
+var HISTORY_SCHEMA = 1
+var HISTORY_KEYS = ["schema", "days", "months", "years", "ext"]
+
+// The parsed top level of history.json's text, or null.
+function parseHistoryText(text) {
+  try {
+    var doc = JSON.parse(String(text))
+    return isPlainObject(doc) ? doc : null
+  } catch (e) {
+    return null
+  }
+}
+
+// "" when this tracker may write the file, else why not (one line).
+function historyWriteBlock(doc) {
+  if (!doc) return ""
+  var schema = Number(doc.schema) || 0
+  if (schema > HISTORY_SCHEMA)
+    return "history.json is from a newer Kanso (schema " + schema + ")"
+  var unknown = []
+  for (var k in doc) {
+    if (
+      Object.prototype.hasOwnProperty.call(doc, k) &&
+      HISTORY_KEYS.indexOf(k) < 0
+    )
+      unknown.push(k)
+  }
+  if (unknown.length)
+    return (
+      "history.json has fields this Kanso can't keep (" +
+      unknown.join(", ") +
+      ")"
+    )
+  return ""
+}
+
+// Schema `from` -> HISTORY_SCHEMA, one pure step per version. Empty today:
+// schema 0 (agx 1.6.2, Kanso 0.9) is schema 1's format.
+var HISTORY_MIGRATIONS = {}
+function migrateHistory(doc, from) {
+  var v = Math.max(0, Number(from) || 0)
+  var out = doc
+  for (; v < HISTORY_SCHEMA; v++) {
+    if (typeof HISTORY_MIGRATIONS[v] === "function")
+      out = HISTORY_MIGRATIONS[v](out)
+  }
   return out
 }
 
@@ -528,6 +599,10 @@ if (typeof module !== "undefined" && module && module.exports) {
     dayKey: dayKey,
     newDay: newDay,
     copyDay: copyDay,
+    HISTORY_SCHEMA: HISTORY_SCHEMA,
+    parseHistoryText: parseHistoryText,
+    historyWriteBlock: historyWriteBlock,
+    migrateHistory: migrateHistory,
     isHours: isHours,
     hoursArray: hoursArray,
     prevKey: prevKey,

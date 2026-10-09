@@ -4,7 +4,7 @@
   "name": "Kanso Screen Time",
   "version": "1.0.0",
   "author": "nathankramm",
-  "description": "Screen time for Omarchy, kept quietly: per-app, terminal-aware, totals kept forever. Started as a fork of agx's Screen Time.",
+  "description": "Screen time that sees inside your terminal: per-app, hour by hour, with week, month and year views. All local.",
   "kinds": [
     "service",
     "bar-widget"

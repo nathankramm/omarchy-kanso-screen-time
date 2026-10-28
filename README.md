@@ -69,12 +69,18 @@ Started as a fork of
   scrolls and never changes size.
 
 - **Reports**: right-click the glyph for Omarchy's own menu.
+  - **Ask agent**: the whole picture to
+    `~/.local/state/kanso-screen-time/report-<time>.md`, then your default
+    coding agent (`omarchy default agent`) opened on it to answer your
+    questions. Claude starts in plan mode. With no default agent, or one
+    that is not installed, a notification says so: use Copy report. Each ask
+    leaves its file; nothing removes them.
   - **Copy report**: the whole picture as Markdown, to the clipboard.
   - **Save report**: `~/Documents/screen-time-YYYY-MM-DD.md`, replacing
     today's copy.
 
-  A notification confirms each, or carries the error; a failed save writes
-  nothing. The same from a terminal: `omarchy-shell io.github.nathankramm.kanso copy` and
+  A notification confirms a copy or a save, or carries the error; a failed
+  save or ask writes nothing. The same from a terminal: `omarchy-shell io.github.nathankramm.kanso copy` and
   `omarchy-shell io.github.nathankramm.kanso save`.
 
 - **Answers questions in the terminal**: `screen-time report` with `--day`,

@@ -3,11 +3,11 @@ import QtQuick
 import qs.Commons
 import "../js/Contrast.js" as Contrast
 
-// The screen-time hover card, in nathan.monarch's grammar at 460 px. Five pages
+// The screen-time hover card, 460 px wide. Five pages
 // (D16: hover = glance, click = detail): the GLANCE (hero · segmented bar · the
 // top three rows · Details ›); and four detail pages behind a Day · Week · Month ·
-// Year switch: the DAY (D11: hero · the line vs the all-time average · the 30-day chart · one
-// segmented bar · up to six rows and Other · the footer); the WEEK (D19: hero ·
+// Year switch: the DAY (D11: hero · the line vs the all-time average · the day by
+// hour, D42 · one segmented bar · up to six rows and Other · the footer); the WEEK (D19: hero ·
 // the week line · seven day bars · segmented bar · rows · footer); the MONTH (V1:
 // the Week's layout, a bar per day) and the YEAR (D19b: twelve month bars).
 // ‹ › on every detail page ask the owner for the neighbour's page (V1: the bar
@@ -39,6 +39,9 @@ Item {
     property string failedPage: ""           // the tab whose latest page run failed: one quiet line
     signal pageRequested(string page, string key)
 
+    readonly property var tnum: ({
+            "tnum": 1
+        })   // tabular figures: numbers that change keep their width
     readonly property int maxRows: 7       // Today: six named rows and Other
     readonly property int glanceRows: 3    // the glance: the top three named rows
     // Secondary text: the dimmest mix of the text toward the surface that still
@@ -85,18 +88,22 @@ Item {
     // Each page has a fixed height; the glance is the short one.
     implicitHeight: page === "glance" ? glance_.implicitHeight : today_.implicitHeight
 
-    // A small text link: a hover-mode popup takes no focus, but it takes clicks
-    // (nathan.monarch's open link).
-    component Link: Text {
+    // Secondary text: plain, muted, caption size (a colour or size may override it).
+    component Caption: Text {
+        textFormat: Text.PlainText
+        color: hc.muted
+        font.family: hc.fontFamily
+        font.pixelSize: Style.font.caption
+    }
+
+    // A small text link: a hover-mode popup takes no focus, but it takes clicks.
+    component Link: Caption {
         id: link
         signal activated
         property bool current: false   // the page switch's highlight (D19)
-        textFormat: Text.PlainText
         // the current page reads in the text colour (accent text fell to 3.14:1 on
         // light themes); its accent underline is a graphic, which needs only 3:1
         color: link.current ? hc.foreground : linkArea.containsMouse ? Color.accent : hc.muted
-        font.family: hc.fontFamily
-        font.pixelSize: Style.font.caption
         font.bold: link.current
 
         Rectangle {
@@ -120,9 +127,12 @@ Item {
         }
     }
 
-    // The glance's hero: today's total · "today" (no date pill: the bar's clock shows
-    // the date, audit C6); while there is no card, the fallback line takes its place.
+    // A hero: a total · its label, today's on the glance (no date pill: the bar's clock
+    // shows the date, audit C6) and a page's in its header; while there is no card,
+    // the fallback line takes its place.
     component Hero: Item {
+        id: hero
+        property var view: hc.today
         width: parent ? parent.width : hc.cardWidth
         height: Math.ceil(displayMetrics.height)
 
@@ -141,25 +151,19 @@ Item {
         Text {
             id: heroTotal
             textFormat: Text.PlainText
-            text: hc.today ? hc.today.total_text : ""
+            text: hero.view ? hero.view.total_text : ""
             color: hc.foreground
             font.family: hc.fontFamily
             font.pixelSize: Style.font.display
             font.bold: true
-            font.features: ({
-                    "tnum": 1
-                })
+            font.features: hc.tnum
         }
 
-        Text {
+        Caption {
             anchors.left: heroTotal.right
             anchors.leftMargin: Style.space(8)
             anchors.baseline: heroTotal.baseline
-            textFormat: Text.PlainText
-            text: hc.today ? hc.today.label : ""
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
+            text: hero.view ? hero.view.label : ""
         }
     }
 
@@ -186,7 +190,8 @@ Item {
         }
     }
 
-    // An app row: swatch · name · vs its average · today. Shared by the glance and Today.
+    // An app row: swatch · name · vs its average (Day only) · its time. Shared by
+    // the glance and every detail page.
     component AppRow: Item {
         id: row
         required property var modelData
@@ -215,20 +220,14 @@ Item {
             elide: Text.ElideRight
         }
 
-        Text {
+        Caption {
             id: rowVs
             // the glance is the least on screen: times only (audit P1); Day keeps the comparison
             visible: hc.page !== "glance"
             x: rowValue.x - Style.space(14) - implicitWidth
             anchors.baseline: rowName.baseline
-            textFormat: Text.PlainText
             text: row.modelData.vs_text || ""
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
-            font.features: ({
-                    "tnum": 1
-                })
+            font.features: hc.tnum
         }
 
         Text {
@@ -242,40 +241,32 @@ Item {
             color: hc.foreground
             font.family: hc.fontFamily
             font.pixelSize: Style.font.body
-            font.features: ({
-                    "tnum": 1
-                })
+            font.features: hc.tnum
         }
     }
 
+    // The hairline above a footer (none while there is no card).
+    component Rule: Rectangle {
+        width: parent ? parent.width : hc.cardWidth
+        height: 1
+        color: hc.live ? hc.faint(0.18) : "transparent"
+    }
+
     // The detail pages' footer, left: all-time · since the first day. Shared by
-    // Day, Week and Year (D19: the week total lives on the Week page).
+    // every detail page (D19: the week total lives on the Week page).
     component AllTimeLine: Row {
         spacing: Style.space(6)
 
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: hc.footer ? "all-time" : ""
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: hc.footer ? hc.footer.all_time_text : ""
             color: hc.foreground
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
-            font.features: ({
-                    "tnum": 1
-                })
+            font.features: hc.tnum
         }
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: hc.footer ? hc.footer.since_text : ""
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
     }
 
@@ -290,36 +281,24 @@ Item {
             current: hc.page === "today"
             onActivated: hc.page = "today"
         }
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: "·"
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
         Link {
             text: "Week"
             current: hc.page === "week"
             onActivated: hc.page = "week"
         }
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: "·"
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
         Link {
             text: "Month"
             current: hc.page === "month"
             onActivated: hc.page = "month"
         }
-        Text {
-            textFormat: Text.PlainText
+        Caption {
             text: "·"
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
         Link {
             text: "Year"
@@ -339,25 +318,17 @@ Item {
             visible: hc.failedPage !== hc.page && hc.noticeDetail === ""
         }
 
-        Text {
+        Caption {
             visible: hc.live && hc.failedPage === hc.page && hc.noticeDetail === ""
-            textFormat: Text.PlainText
             text: "Couldn't load that page"
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
 
         // #1/#3: the notice takes the all-time line's place; the card's size holds
-        Text {
+        Caption {
             visible: hc.noticeDetail !== ""
             width: pageSwitch.x - Style.space(8)
             elide: Text.ElideRight
-            textFormat: Text.PlainText
             text: hc.noticeDetail
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
         }
 
         PageSwitch {
@@ -378,40 +349,8 @@ Item {
         width: parent ? parent.width : hc.cardWidth
         height: Math.ceil(displayMetrics.height)
 
-        Text {
-            visible: !hc.live
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width
-            textFormat: Text.PlainText
-            text: hc.doc && !hc.live ? (hc.doc.message || "") : hc.fallbackText
-            color: hc.foreground
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.body
-            elide: Text.ElideRight
-        }
-
-        Text {
-            id: headerTotal
-            textFormat: Text.PlainText
-            text: header.view ? header.view.total_text : ""
-            color: hc.foreground
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.display
-            font.bold: true
-            font.features: ({
-                    "tnum": 1
-                })
-        }
-
-        Text {
-            anchors.left: headerTotal.right
-            anchors.leftMargin: Style.space(8)
-            anchors.baseline: headerTotal.baseline
-            textFormat: Text.PlainText
-            text: header.view ? header.view.label : ""
-            color: hc.muted
-            font.family: hc.fontFamily
-            font.pixelSize: Style.font.caption
+        Hero {
+            view: header.view
         }
 
         Item {
@@ -445,17 +384,11 @@ Item {
                 border.width: 1
                 border.color: Style.normalBorderFor(hc.foreground, Color.accent, Color.urgent)
 
-                Text {
+                Caption {
                     id: pillLabel
                     anchors.centerIn: parent
-                    textFormat: Text.PlainText
                     text: header.pillText
-                    color: hc.muted
-                    font.family: hc.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.features: ({
-                            "tnum": 1
-                        })
+                    font.features: hc.tnum
                 }
             }
         }
@@ -492,9 +425,7 @@ Item {
         font.family: hc.fontFamily
         font.pixelSize: Style.font.body
         font.bold: !pageLine.warming
-        font.features: ({
-                "tnum": 1
-            })
+        font.features: hc.tnum
         elide: Text.ElideRight
     }
 
@@ -525,22 +456,20 @@ Item {
         }
     }
 
-    // Its label, the chart's top right: "avg 2h 37m · 12 days".
+    // Its label, the chart's top right: the engine's "avg 2h 36m a day" (D41).
     component MeanLabel: Text {
         y: Style.space(2)
         textFormat: Text.PlainText
         color: hc.muted
         font.family: hc.fontFamily
         font.pixelSize: Style.font.caption
-        font.features: ({
-                "tnum": 1
-            })
+        font.features: hc.tnum
     }
 
-    // The Week's, Month's and Year's bars, in the 30-day chart's frame and D15
-    // style: the engine's x and y times pixels; today (or this month) in the
-    // accent; future slots and slots before the first tracked day are empty
-    // outlines, never a bar. The frame is untinted: a tint lowered every bar's
+    // Every chart's bars, D15 style (the Day's hours, D42; the Week's, Month's
+    // and Year's): the engine's x and y times pixels; today, this hour or this
+    // month in the accent; future slots and slots before the first tracked day
+    // are empty outlines, never a bar. The frame is untinted: a tint lowered every bar's
     // contrast (audit: the today bar fell to 2.92:1 on rose-pine).
     component PeriodPlot: Rectangle {
         id: plotFrame
@@ -574,19 +503,13 @@ Item {
                     color: hc.faint(0.14)
                 }
 
-                Text {
+                Caption {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 0
                     width: plotFrame.gutter - Style.space(4)
                     horizontalAlignment: Text.AlignRight
-                    textFormat: Text.PlainText
                     text: tick.modelData.text
-                    color: hc.muted
-                    font.family: hc.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.features: ({
-                            "tnum": 1
-                        })
+                    font.features: hc.tnum
                 }
             }
         }
@@ -633,15 +556,12 @@ Item {
                         color: periodBar.isCurrent ? Color.accent : hc.barColor
                     }
 
-                    Text {
+                    Caption {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.bottom
                         anchors.topMargin: Style.space(3)
-                        textFormat: Text.PlainText
                         text: periodBar.modelData.label || ""
                         color: periodBar.isCurrent ? hc.foreground : hc.muted
-                        font.family: hc.fontFamily
-                        font.pixelSize: Style.font.caption
                     }
                 }
             }
@@ -700,11 +620,7 @@ Item {
             }
         }
 
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: hc.live ? hc.faint(0.18) : "transparent"
-        }
+        Rule {}
 
         PageFooter {}
     }
@@ -750,11 +666,7 @@ Item {
             }
         }
 
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: hc.live ? hc.faint(0.18) : "transparent"
-        }
+        Rule {}
 
         // today only: the footer holds just the way to the detail (and, #1/#3, the
         // notice on its left)
@@ -762,15 +674,11 @@ Item {
             width: parent.width
             height: Math.ceil(captionMetrics.height)
 
-            Text {
+            Caption {
                 visible: hc.notice !== ""
                 width: detailsLink.x - Style.space(8)
                 elide: Text.ElideRight
-                textFormat: Text.PlainText
                 text: hc.notice
-                color: hc.muted
-                font.family: hc.fontFamily
-                font.pixelSize: Style.font.caption
             }
 
             Link {
@@ -784,7 +692,7 @@ Item {
     }
 
     // ---- the DAY page (click / Details ›): any day, today first. Header · the
-    //      line vs the average · the 30-day chart ending that day · segmented bar · rows · footer
+    //      line vs the average · the day by hour · segmented bar · rows · footer
     Column {
         id: today_
         visible: hc.page === "today"
@@ -820,28 +728,20 @@ Item {
                 gap: Style.space(2)
             }
 
-            Text {
+            Caption {
                 visible: plot.partial
                 anchors.bottom: parent.bottom
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                textFormat: Text.PlainText
                 text: plot.partial ? hc.dayHours.text : ""
-                color: hc.muted
-                font.family: hc.fontFamily
-                font.pixelSize: Style.font.caption
             }
 
-            Text {
+            Caption {
                 visible: hc.dayHours !== null && hc.dayHours.state === "pending"
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                textFormat: Text.PlainText
                 text: hc.dayHours ? hc.dayHours.text : ""
-                color: hc.muted
-                font.family: hc.fontFamily
-                font.pixelSize: Style.font.caption
             }
         }
 
@@ -861,11 +761,7 @@ Item {
             }
         }
 
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: hc.live ? hc.faint(0.18) : "transparent"
-        }
+        Rule {}
 
         PageFooter {}
     }

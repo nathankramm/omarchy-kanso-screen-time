@@ -82,8 +82,7 @@ Started as a fork of
   day and its apps), as text, `--json` or `--md`. Every app is listed, hidden
   ones marked, and the rows add up to the total exactly. `report --md` alone
   gives today, this week, this year and all-time, with your average day, week
-  and month. More in AGENTS.md, "How to
-  audit screen time".
+  and month. More in "How to audit screen time" below.
 - **Names** come from `~/.config/omarchy/screen-time/names.json`: rename, hide
   (into Other) or ignore (stop counting) an app by its stored key.
   `screen-time keys` lists the keys, each with the label it shows now and
@@ -101,6 +100,47 @@ Started as a fork of
   share one row); `hide` folds apps into Other without changing the total;
   `ignore` stops counting an app from then on (time already recorded stays).
   Every field is optional. Renames and hides show within a minute.
+
+## How to audit screen time
+
+`screen-time report` reads the history read-only and never writes. For an
+audit, ask for one period and a format; every app is listed (no six-row cap,
+sub-minute apps included), hidden apps are marked `(hidden)` instead of
+dropped, and time with no app detail (archive days older than the 365-day
+window, legacy month lumps, a day's untracked remainder) is its own
+`(no app detail)` row, so **the rows always add up to the total exactly**
+(in `--json`, to the millisecond; the `Xh Ym` texts are rounded).
+
+```bash
+screen-time report --day 2026-10-05            # one day, plain text
+screen-time report --week 2026-10-07           # the Mon–Sun week holding that date
+screen-time report --month 2026-10 --md        # a Markdown table (App | Time)
+screen-time report --year 2026 --json          # machine-readable, ms exact
+screen-time report --month 2026-10 --by-day    # every day of the month, each with
+                                               # its total and every app
+screen-time report --year 2026 --by-day --json # the same for a year, ms exact
+screen-time report --md > screen-time.md       # the whole picture: today, this
+                                               # week by day, this year by month,
+                                               # all-time
+```
+
+`--by-day` (with `--month` or `--year` only; anything else exits 2) adds
+`by_day`: every day up to today, each `{key, label, total_ms, total_text,
+rows}` with its rows adding up to its own `total_ms`. Legacy month lumps have
+no day: they are `undated_ms`, and `sum(by_day[].total_ms) + undated_ms ==
+total_ms`. Days before the 365-day window keep their apps (in `archive/`).
+
+The whole picture's `all_time.averages.{day,week,month}` are the card's
+baselines: the mean of every completed day with at least a minute (never the install day),
+whole Mon–Sun week and whole month, as `{ms, text, periods}`, or before
+there are 3 / 2 / 2 of them `{starts_key, starts_text}`, the date the
+average starts.
+
+For an AI agent: prefer `--json` and check `sum(rows[].ms) == total_ms`
+yourself (and, by day, each day's rows against its own total); use `rows[].keys` to see which stored keys a label covers and
+`rows[].hidden` for what the card folds into Other. A wrong label is fixed
+in names.json (see Names above), never in history.json. Periods in the
+future are empty; an invalid period exits 2 with "not a valid period".
 
 ## Privacy
 
@@ -227,8 +267,9 @@ history in `~/.config/omarchy/screen-time/` stays until you delete it.
 
 ## Development
 
-See `AGENTS.md` for the layout, the commands every commit must pass, and the
-house rules.
+Tests, the oracle and its mutation run live in a separate development
+repository. Each release is copied from there into this repository as one
+commit.
 
 ## License
 

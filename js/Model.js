@@ -272,7 +272,7 @@ function sanitizeDay(d) {
     else appsChanged = true
   }
   // D42: hours are optional; malformed ones are dropped (the day stays valid)
-  var hoursOk = d.hours === undefined || isHours(d.hours)
+  var hoursOk = d.hours === undefined || hoursArray(d.hours) !== null
   if (total === d.total && !appsChanged && hoursOk)
     return { day: d, changed: false }
   // #3: fields this version doesn't know (a newer version's) are kept
@@ -435,11 +435,6 @@ function hoursArray(h) {
   return out
 }
 
-// D42: 24 finite, non-negative ms totals (D46: any array-like hoursArray takes).
-function isHours(h) {
-  return hoursArray(h) !== null
-}
-
 function prevKey(key) {
   var d = keyToDate(key)
   if (!d) return ""
@@ -461,56 +456,6 @@ function pruneDays(days, todayKey, keepDays) {
     else changed = true
   }
   return changed ? out : days
-}
-
-// 12 monthly totals merging raw days, month lumps and archive.
-function numMs(v) {
-  var n = Number(v)
-  return isFinite(n) && n > 0 ? n : 0
-}
-
-// Rolls days dropped by the retention window into the perpetual per-day
-// archive. Only the total survives — the app breakdown never leaves the
-// 365-day detail window.
-function rollupArchive(years, prunedDays) {
-  if (!prunedDays) return years || {}
-  var out = Object.assign({}, years || {})
-  for (var dk in prunedDays) {
-    if (!Object.prototype.hasOwnProperty.call(prunedDays, dk)) continue
-    // Only real day keys roll up; anything else (including "__proto__")
-    // would corrupt the archive object.
-    if (!isDayKey(dk)) continue
-    var d = prunedDays[dk]
-    // String totals (from corrupt history) must archive as numbers.
-    var total = numMs(d && d.total)
-    if (total <= 0) continue
-    var parts = String(dk).split("-")
-    if (parts.length !== 3) continue
-    var yearObj = out[parts[0]] ? Object.assign({}, out[parts[0]]) : {}
-    yearObj[dk] = total
-    out[parts[0]] = yearObj
-  }
-  return out
-}
-
-// Prune old days into the archive; unchanged inputs return by identity.
-// The archive grows forever, so every recorded year keeps its day totals.
-function applyRetention(days, years, todayKey, keepDays) {
-  var kept = pruneDays(days, todayKey, keepDays)
-  if (kept === days) return { days: days, years: years, pruned: false }
-  var pruned = {}
-  for (var k in days) {
-    if (
-      Object.prototype.hasOwnProperty.call(days, k) &&
-      !Object.prototype.hasOwnProperty.call(kept, k)
-    )
-      pruned[k] = days[k]
-  }
-  return {
-    days: kept,
-    years: rollupArchive(years, pruned),
-    pruned: true,
-  }
 }
 
 // ---- D20: per-app detail kept forever ---------------------------------------
@@ -595,7 +540,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     keyToDate: keyToDate,
     sanitizeHistory: sanitizeHistory,
     sanitizeDay: sanitizeDay,
-    numMs: numMs,
     dayKey: dayKey,
     newDay: newDay,
     copyDay: copyDay,
@@ -603,7 +547,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     parseHistoryText: parseHistoryText,
     historyWriteBlock: historyWriteBlock,
     migrateHistory: migrateHistory,
-    isHours: isHours,
     hoursArray: hoursArray,
     prevKey: prevKey,
     pruneDays: pruneDays,
@@ -611,8 +554,6 @@ if (typeof module !== "undefined" && module && module.exports) {
     shouldArchive: shouldArchive,
     parseArchived: parseArchived,
     confirmArchived: confirmArchived,
-    applyRetention: applyRetention,
     sanitizeYears: sanitizeYears,
-    rollupArchive: rollupArchive,
   }
 }

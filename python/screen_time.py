@@ -27,23 +27,10 @@ Day keys are LOCAL calendar days (YYYY-MM-DD), the same as Model.dayKey in the
 tracker. Day arithmetic is done on dates, never on timestamps, so a 23- or
 25-hour DST day cannot shift a key.
 
-CARD CONTRACT (schema 11, D48: a Day's `hours` drawn in part are "partial",
-captioned "hours from 12 PM". Schema 10, D44: Week, Month and Year draw two gridlines, clear of the
-dashed average. Schema 9, D43: every chart has `ticks`, its time scale. Schema 8, D42: the Day page's `chart` (30 days) is `hours`, the day by
-hour. Schema 7, D41: "avg" only ever means the all-time average: the
-line has no `head`, the week page no `avg_text`, the Year's line drops "avg", and
-every dashed line is the one average day (Year: the average month) labelled
-with its unit. Schema 6, D38: every page's `line` compares it with the all-time
-average of its kind, and its chart's dashed line is that average (`mean_*` on the
-Day's chart and on every period page); the top-level `usual` and `chart` are gone,
-the Day page has them. Schema 5, V1: the card holds this day, week, month and year
-as `day`, `week`, `month`, `year`, one page each, and `card --page` gives any
-other; `years`, `year_index` and the list of week pages are gone; week bars'
-`letter` is `label`; chart.end_label. Schema 4: D30 added `palette`, the rows' colours
-from the theme; schema 3: D19 added `week` and took the week out of footer.text;
-schema 1 also had chips, dropped by D11). The card prints exactly one JSON object and exits 0,
-whatever happens. QML paints the strings and the 0..1 numbers as given and
-does no arithmetic beyond pixels.
+CARD CONTRACT (schema 11; how it got here: AGENTS.md, "Card schema history").
+The card prints exactly one JSON object and exits 0, whatever happens. QML
+paints the strings and the 0..1 numbers as given and does no arithmetic beyond
+pixels.
 
     schema   int     11
     state    str     "ok" | "empty" | "missing" | "corrupt" | "error"
@@ -63,7 +50,7 @@ does no arithmetic beyond pixels.
         keys        list stored keys folded into this row
         value_ms    int
         value_text  str
-        swatch      str  "#RRGGBB" (Monarch's palette; Other is its neutral)
+        swatch      str  "#rrggbb" from `palette` (D30): swatches by rank, Other its other
         other       bool true only for the Other row
         vs_text     str  the row against the app's own all-time average day: "▲ 12m"
                          | "≈" | today under it "avg 40m" | a finished day under it
@@ -113,7 +100,6 @@ does no arithmetic beyond pixels.
                     Year's average month, "avg 22h 51m a month"; 0, "", null
                     without one. The Day's hourly chart has none (its line
                     compares the day with the average day).
-                    the chart.
         y_max_ms    what y = 1 means (y_max_text is no longer painted, D38)
         ticks       the time scale: list of {ms, text, y}, each a faint gridline at
                     y (= ms / y_max_ms) labelled in the left gutter. Week, Month
@@ -468,21 +454,6 @@ def day_total(hist, d):
 
 # ---- names --------------------------------------------------------------------
 
-# Monarch's eight swatches, in its order: the Monarch bar plugin's
-# PALETTE, validated there against the popup surface
-# #1a1b26. Named rows take the first six by rank; Other takes the last, the
-# neutral Monarch gives its own Other row.
-PALETTE = [
-    "#0072B2",
-    "#56B4E9",
-    "#CC79A7",
-    "#F0E442",
-    "#9085E9",
-    "#D9D9D9",
-    "#7A5FD0",
-    "#9A9A9A",
-]
-OTHER_SWATCH = PALETTE[7]
 OTHER = "Other"
 MAX_ROWS = 6
 MIN_ROW_MS = 60_000
@@ -740,38 +711,24 @@ def theme_candidates(colors, bg):
 def pick_six(cands):
     """The 6 keys whose smallest colour-blind distance (then normal-vision
     distance) is largest, ordered so neighbours are as far apart as possible.
-    Strict comparisons over a fixed order: the first best wins, every run."""
-    keys = list(cands)
-    cvd = {
-        (a, b): cvd_distance(cands[a], cands[b])
-        for a, b in itertools.combinations(keys, 2)
-    }
-    norm = {
-        (a, b): delta_e2000(cands[a], cands[b])
-        for a, b in itertools.combinations(keys, 2)
-    }
+    max() keeps the first best over a fixed order: the same pick every run."""
+    dist = {}
+    for a, b in itertools.combinations(cands, 2):
+        d = (cvd_distance(cands[a], cands[b]), delta_e2000(cands[a], cands[b]))
+        dist[a, b] = dist[b, a] = d
 
-    def pair(table, a, b):
-        return table[(a, b)] if (a, b) in table else table[(b, a)]
+    def spread(pairs):
+        pairs = list(pairs)
+        return min(dist[p][0] for p in pairs), min(dist[p][1] for p in pairs)
 
-    best, best_score = None, None
-    for subset in itertools.combinations(keys, 6):
-        pairs = list(itertools.combinations(subset, 2))
-        score = (
-            min(pair(cvd, a, b) for a, b in pairs),
-            min(pair(norm, a, b) for a, b in pairs),
-        )
-        if best_score is None or score > best_score:
-            best, best_score = subset, score
-    order, order_score = None, None
-    for perm in itertools.permutations(best):
-        steps = list(itertools.pairwise(perm))
-        score = (
-            min(pair(cvd, a, b) for a, b in steps),
-            min(pair(norm, a, b) for a, b in steps),
-        )
-        if order_score is None or score > order_score:
-            order, order_score = perm, score
+    best = max(
+        itertools.combinations(cands, 6),
+        key=lambda keys: spread(itertools.combinations(keys, 2)),
+    )
+    order = max(
+        itertools.permutations(best),
+        key=lambda keys: spread(itertools.pairwise(keys)),
+    )
     return list(order)
 
 
@@ -927,7 +884,7 @@ def bare_host(host):
 
 def exec_hosts(exe):
     """The hosts of the URLs on an Exec= line (Omarchy web apps launch with
-    `omarchy-launch-webapp "https://app.monarch.com"`, and have no
+    `omarchy-launch-webapp "https://app.example.com"`, and have no
     StartupWMClass to match)."""
     return frozenset(bare_host(h) for h in EXEC_URL_RE.findall(exe or ""))
 
@@ -1238,9 +1195,9 @@ def row_vs_text(hist, row, day_keys, names, current):
 
 def mean_fields(mean, n, kind, y_max, unit=""):
     """A chart's dashed line: its value, its label with the unit its bars measure
-    ("avg 2h 36m" on the Day's day bars, " a day" on a Week's or Month's, " a
-    month" on the Year's), and its height ("" / None without one). D41: Day,
-    Week and Month all draw the same average day."""
+    (" a day" on a Week's or Month's day bars, " a month" on the Year's), and
+    its height ("" / None without one). D41: Week and Month draw the same
+    average day; the Day's hourly chart has no dashed line (D42)."""
     if n < AVERAGE_NEEDS[kind]:
         return {"mean_ms": 0, "mean_text": "", "mean_y": None}
     return {
@@ -1251,9 +1208,9 @@ def mean_fields(mean, n, kind, y_max, unit=""):
 
 
 # ---- the time scale (D43) -----------------------------------------------------
-# One faint gridline per Week, Month and Year chart, at the largest round value
-# below the chart's top with room for its label; the hourly chart's scale is
-# fixed. The engine picks every tick and its y; QML paints them.
+# Two faint gridlines per Week, Month and Year chart (D44, scale_ticks); the
+# hourly chart's scale is fixed. The engine picks every tick and its y; QML
+# paints them.
 
 TICK_STEPS_MS = [15 * 60_000, 30 * 60_000] + [
     int(h * 3_600_000) for h in (1, 2, 3, 4, 5) + tuple(m * 10**k for k in range(1, 4) for m in (1, 1.5, 2, 2.5, 3, 5))
@@ -1495,7 +1452,7 @@ def average_of(totals, counted, today, total):
 
 # ---- pages (V1, schema 5). The card holds this day, week, month and year; any
 # other is one `card --page kind:key` run. ‹ › are the neighbours' keys, back to
-# the first tracked day and never past today.
+# the first tracked period (page_for) and never past today.
 
 PAGE_KINDS = ("day", "week", "month", "year")
 YEAR_KEY_RE = re.compile(r"^\d{4}$")
@@ -1565,12 +1522,12 @@ def week_range_text(monday, today):
     return text if sunday.year == today.year else f"{text}, {sunday.year}"
 
 
-def week_bars(totals, monday, today, first, scale=0):
-    """Seven slots, Monday first. Days after today are "future" and days before
-    the first tracked day "before": empty slots, never a bar."""
+def day_bars(totals, days, labels, today, first, scale=0):
+    """One slot per day (a Week's seven, a Month's every day), labelled by
+    `labels`. Days after today are "future" and days before the first tracked
+    day "before": empty slots, never a bar."""
     slots = []
-    for i in range(7):
-        d = monday + datetime.timedelta(days=i)
+    for i, d in enumerate(days):
         if d > today:
             state = "future"
         elif first is None or d < first:
@@ -1583,10 +1540,10 @@ def week_bars(totals, monday, today, first, scale=0):
     bars = [
         {
             "key": day_key(d),
-            "label": WEEK_LETTERS[i],
+            "label": labels[i],
             "ms": ms,
             "text": fmt(ms) if state in ("past", "today") else "",
-            "x": i / 6,
+            "x": i / (len(days) - 1),
             "y": ms / max(1, y_max),
             "state": state,
         }
@@ -1596,8 +1553,8 @@ def week_bars(totals, monday, today, first, scale=0):
 
 
 def week_page(hist, totals, monday, today, first, names, palette, periods):
-    """One Week page. The line: the week's daily average, then the week against
-    the all-time average week (D38); this week over Monday..today, "by Wed"."""
+    """One Week page. The line: the week against the all-time average week (D38,
+    D41: only the comparison); this week over Monday..today, "by Wed"."""
     days = [monday + datetime.timedelta(days=i) for i in range(7)]
     counted = [d for d in days if d <= today and first is not None and d >= first]
     total = sum(totals.get(day_key(d), 0) for d in counted)
@@ -1608,10 +1565,12 @@ def week_page(hist, totals, monday, today, first, names, palette, periods):
     mean, n = average(periods["week"], key, today.weekday() + 1 if now else None)
     by = f" by {WEEKDAYS[today.weekday()]}" if now else ""
     line = average_line("week", total, mean, n, now, by, today, first)
-    # the dashed line: the one average day, as the Day page's (D41)
+    # the dashed line: the one average day (D41)
     day_mean, day_n = average(periods["day"], None)
     has_mean = day_n >= AVERAGE_NEEDS["day"]
-    bars, y_max = week_bars(totals, monday, today, first, day_mean if has_mean else 0)
+    bars, y_max = day_bars(
+        totals, days, WEEK_LETTERS, today, first, day_mean if has_mean else 0
+    )
     current = monday_of(today)
     week = datetime.timedelta(days=7)
     label = (
@@ -1663,37 +1622,6 @@ def month_text(first_of, today):
     return name if first_of.year == today.year else f"{name} {first_of.year}"
 
 
-def month_bars(totals, first_of, today, first, scale=0):
-    """One slot per day of the month. Days after today are "future" and days
-    before the first tracked day "before": empty slots, never a bar."""
-    n = month_length(first_of)
-    slots = []
-    for i in range(n):
-        d = first_of + datetime.timedelta(days=i)
-        if d > today:
-            state = "future"
-        elif first is None or d < first:
-            state = "before"
-        else:
-            state = "today" if d == today else "past"
-        ms = totals.get(day_key(d), 0) if state in ("past", "today") else 0
-        slots.append((i, d, state, ms))
-    y_max = max([ms for _, _, _, ms in slots] + [scale])
-    bars = [
-        {
-            "key": day_key(d),
-            "label": str(d.day) if d.day in MONTH_LABELS else "",
-            "ms": ms,
-            "text": fmt(ms) if state in ("past", "today") else "",
-            "x": i / (n - 1),
-            "y": ms / max(1, y_max),
-            "state": state,
-        }
-        for i, d, state, ms in slots
-    ]
-    return bars, y_max
-
-
 def month_total(totals, lumps, first_of, days):
     return sum(totals.get(day_key(d), 0) for d in days) + lumps.get(
         first_of.strftime("%Y-%m"), 0
@@ -1703,9 +1631,9 @@ def month_total(totals, lumps, first_of, days):
 def month_page(hist, totals, lumps, first_of, today, first, names, palette, periods):
     """One Month page, the Week's layout: a bar per day of the month. `first`
     counts legacy month lumps from their 1st (first_day), so a lump month's days
-    are counted (as zeros) and its lump lands in Other. The line: the month's
-    daily average, then the month against the all-time average month (D38);
-    this month over the 1st..today, "by Oct 6"."""
+    are counted (as zeros) and its lump lands in Other. The line: the month
+    against the all-time average month (D38, D41: only the comparison); this
+    month over the 1st..today, "by Oct 6"."""
     n = month_length(first_of)
     days = [first_of + datetime.timedelta(days=i) for i in range(n)]
     counted = [d for d in days if d <= today and first is not None and d >= first]
@@ -1717,11 +1645,12 @@ def month_page(hist, totals, lumps, first_of, today, first, names, palette, peri
     mean, n_used = average(periods["month"], key, today.day if now else None)
     by = f" by {MONTHS[today.month - 1]} {today.day}" if now else ""
     line = average_line("month", total, mean, n_used, now, by, today, first)
-    # the dashed line: the one average day, as the Day page's (D41)
+    # the dashed line: the one average day (D41)
     day_mean, day_n = average(periods["day"], None)
     has_mean = day_n >= AVERAGE_NEEDS["day"]
-    bars, y_max = month_bars(
-        totals, first_of, today, first, day_mean if has_mean else 0
+    labels = [str(d.day) if d.day in MONTH_LABELS else "" for d in days]
+    bars, y_max = day_bars(
+        totals, days, labels, today, first, day_mean if has_mean else 0
     )
     current = today.replace(day=1)
     label = (
@@ -1896,9 +1825,9 @@ def fold_rows(apps, total, names, palette=None):
     """Named rows largest first (at most MAX_ROWS), then Other. Hidden apps, apps
     under a minute and anything past MAX_ROWS fold into Other, which takes what
     the named rows leave of `total`: the rows always add up to it."""
-    # this run's row colours (D30); without them, the fixed Monarch set
-    swatches = palette["swatches"] if palette else PALETTE[:MAX_ROWS]
-    other_swatch = palette["other"] if palette else OTHER_SWATCH
+    # this run's row colours (D30); the text verbs pass none and paint none
+    swatches = palette["swatches"] if palette else [""] * MAX_ROWS
+    other_swatch = palette["other"] if palette else ""
     by_label, keys_of, other_keys = {}, {}, []
     for key, ms in apps.items():
         if key in names.hidden:

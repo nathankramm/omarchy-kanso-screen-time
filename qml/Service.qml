@@ -9,9 +9,10 @@ import "../js/State.js" as State
 // qmllint disable unqualified
 
 // Screen-time tracker: accrues focused time per app into per-day records.
-// Persisted as { "<YYYY-MM-DD>": { total, apps } }; 60s commits bound
-// crash loss. Transitions live in State.js; this file owns timers,
-// disk I/O, processes and bindings.
+// Persisted as history.json { schema, days: { "<YYYY-MM-DD>": { total, apps,
+// hours } }, months, years, ext }; the 5 s heartbeat commits bound crash loss.
+// Transitions live in State.js; this file owns timers, disk I/O, processes
+// and bindings.
 Item {
     id: root
 
@@ -23,7 +24,7 @@ Item {
     // the version it expects (BarWidget.qml expectedServiceVersion) and asks for
     // a restart when they differ. 0.9.0's Service has no such property.
     // Bump both together whenever Service.qml, Model.js or State.js change.
-    readonly property int serviceVersion: 2
+    readonly property int serviceVersion: 3
     // Passed explicitly; QML JS modules don't share imports.
     readonly property var stateModel: Model
 
@@ -33,25 +34,19 @@ Item {
     // 3.11 the engine needs (tomllib, datetime.UTC).
     readonly property string python: "/usr/bin/python3"
     readonly property string dataDir: home + "/.config/omarchy/screen-time"
+    // A file of this plugin as a path: Qt.resolvedUrl gives a file:// URL.
+    function localPath(relative) {
+        var u = Qt.resolvedUrl(relative).toString();
+        return u.startsWith("file://") ? u.slice(7) : u;
+    }
     readonly property string historyPath: dataDir + "/history.json"
     // D20: days past keepDays, apps and all, live in archive/<year>.json
     readonly property string archiveDir: dataDir + "/archive"
-    readonly property string archiverPath: {
-        var u = Qt.resolvedUrl("../python/archive_days.py").toString();
-        return u.startsWith("file://") ? u.slice(7) : u;
-    }
+    readonly property string archiverPath: root.localPath("../python/archive_days.py")
     // One archive run at a time; a failed run waits for the next day (or start).
     property bool archiveInFlight: false
     property string archiveFailedOn: ""
-    // Shared process env (HOME for ~ expansion). Typed var so the
-    // Map-vs-Hash literal inference stays in one audited place.
-    readonly property var procEnv: ({
-            "HOME": home
-        })
-    readonly property string resolverPath: {
-        var u = Qt.resolvedUrl("../python/resolve_app.py").toString();
-        return u.startsWith("file://") ? u.slice(7) : u;
-    }
+    readonly property string resolverPath: root.localPath("../python/resolve_app.py")
 
     // Terminals report the window class; resolve the pty foreground instead.
     // Wayland terminals report either a short binary name or a reverse-DNS
@@ -61,10 +56,9 @@ Item {
     // attributes their time to the command being run.
     readonly property var terminalAppIds: ["foot", "alacritty", "kitty", "ghostty", "wezterm", "konsole", "gnome-terminal", "tilix", "xfce4-terminal", "termite", "st", "org.omarchy.terminal", "com.mitchellh.ghostty", "net.kovidgoyal.kitty", "org.wezfurlong.wezterm", "org.gnome.terminal", "org.gnome.console", "org.kde.konsole", "com.raggesilver.blackbox", "dev.warp.warp", "io.elementary.terminal"]
 
-    // App-detail window in days, fixed: the value upstream agx used on this
-    // machine (its weekly-graph length was never set), so switching never
-    // prunes anything. Days
-    // that age past it roll their totals into the perpetual per-day archive.
+    // history.json's window in days, fixed: agx 1.6.2's default, so switching
+    // from agx never moves a day it kept. Days that age past it move, apps and
+    // all, to archive/<year>.json (D20).
     readonly property int keepDays: 365
 
     // A tick later than this means the loop froze: suspend or clock jump.
@@ -76,10 +70,6 @@ Item {
     property var today: Model.newDay()
     // Disk mirror; root.today is the source of truth.
     property var days: ({})
-    // Pre-archive monthly lumps; never overlaps the day archive.
-    property var months: ({})
-    // Per-day archive keeping retro facts past the raw window.
-    property var years: ({})
 
     property string activeApp: ""
     property double activeStart: 0
@@ -91,7 +81,6 @@ Item {
     property int resolveGeneration: 0
     property int resolveSpawnGen: 0
     property bool ready: false
-    property bool startupPhase: true
     // Mirrors omarchy's first-party session services (omarchy.lock,
     // omarchy.idle) so tracking pauses during lock/screensaver without
     // touching the compositor or spawning helpers on the hot path.
@@ -134,13 +123,8 @@ Item {
         return appId && root.terminalAppIds.indexOf(appId.toLowerCase()) !== -1;
     }
 
-    // steam_app_<id> resolves to the game title via local manifests.
-    function isSteamApp(appId) {
-        return appId && appId.toLowerCase().indexOf("steam_app_") === 0;
-    }
-
-    // Ignored apps are never counted (fed from names.json in a later
-    // commit). Normalized on write so readers compare lowercase keys only.
+    // Ignored apps are never counted (the list comes from names.json, below).
+    // Normalized on write so readers compare lowercase keys only.
     // Names are display-only: stored keys are never renamed.
     property var ignoredApps: []
     function setIgnoredApps(ignored) {
@@ -208,10 +192,7 @@ Item {
     // once for the whole shell (every bar's card paints `card`, so two docked
     // bars never mean two runs), at startup and every 60 s. Nothing spawns on
     // hover. A run that prints no readable card keeps the last good one.
-    readonly property string enginePath: {
-        var u = Qt.resolvedUrl("../python/screen_time.py").toString();
-        return u.startsWith("file://") ? u.slice(7) : u;
-    }
+    readonly property string enginePath: root.localPath("../python/screen_time.py")
     property var card: null
     property bool engineOk: false
     property string engineError: ""
@@ -299,27 +280,24 @@ Item {
         var app = tl && tl.appId ? tl.appId : "";
         root.rawApp = app;
         root.resolveInFlight = false;
+        // The old bucket is closed; a new one opens only for a tracked app.
+        root.activeApp = "";
+        root.activeStart = 0;
         // Paused (locked or screensaver up): keep the bucket closed.
         // Toplevel events still fire under lock; reopening here would
         // accrue straight through the pause.
-        if (root.sessionLocked || root.screensaverActive) {
-            root.activeApp = "";
-            root.activeStart = 0;
+        if (root.sessionLocked || root.screensaverActive)
             return;
-        }
-        if (app && !root.shouldTrack(app)) {
-            root.activeApp = "";
-            root.activeStart = 0;
+        if (app && !root.shouldTrack(app))
             return;
-        }
-        if (app && (root.isTerminal(app) || root.isSteamApp(app))) {
-            root.activeApp = "";
-            root.activeStart = 0;
+        // a terminal, or a Steam game (steam_app_<id>: the title from its local
+        // manifest): its bucket opens when the resolver answers
+        if (app && (root.isTerminal(app) || app.toLowerCase().indexOf("steam_app_") === 0)) {
             root.beginResolve();
-        } else {
-            root.activeApp = Model.canonicalApp(app);
-            root.activeStart = app ? now : 0;
+            return;
         }
+        root.activeApp = Model.canonicalApp(app);
+        root.activeStart = app ? now : 0;
     }
 
     // Re-resolve the focused terminal; a new request invalidates the running one.
@@ -374,7 +352,7 @@ Item {
     // Writes wait while the corrupt-file backup runs.
     property bool backupPending: false
     function persist() {
-        if (root.startupPhase || root.backupPending || root.historyReadOnly)
+        if (!root.ready || root.backupPending || root.historyReadOnly)
             return;
         var merged = Object.assign({}, root.days);
         merged[root.todayKey] = root.today;
@@ -425,7 +403,7 @@ Item {
     property string historyNotice: ""
 
     function scheduleSave() {
-        if (root.startupPhase || root.backupPending || root.historyReadOnly)
+        if (!root.ready || root.backupPending || root.historyReadOnly)
             return;
         // Start, never restart: continuous focus flapping must not defer
         // the write indefinitely past the crash window.
@@ -461,20 +439,16 @@ Item {
         if (clean.days !== historyAdapter.days || clean.months !== historyAdapter.months || clean.years !== historyAdapter.years)
             console.warn("kanso: history.json has malformed sections; ignoring them");
         var d = clean.days;
-        var m = clean.months;
         // D20: nothing is pruned at load; the first save hands days past the
-        // window to the archiver. `years` is the legacy totals-only archive:
-        // read as is, never grown.
-        root.months = m;
+        // window to the archiver. `months` and `years` (legacy lumps and the
+        // totals-only archive) stay in the adapter, written back as read.
         root.days = d;
-        root.years = clean.years;
         if (!root.ready) {
             root.todayKey = Model.dayKey(new Date());
             var prev = d[root.todayKey];
             // D42: Model.copyDay keeps the day's hours (a restart mid-hour loses none)
             root.today = prev && typeof prev === "object" ? Model.copyDay(prev) : Model.newDay();
             root.ready = true;
-            root.startupPhase = false;
             root.lastTick = Date.now();
             root.switchActive();
         } else {
@@ -497,7 +471,6 @@ Item {
             root.days = {};
             root.todayKey = Model.dayKey(new Date());
             root.ready = true;
-            root.startupPhase = false;
             root.lastTick = Date.now();
             root.switchActive();
         }
@@ -549,7 +522,6 @@ Item {
         id: archiveProc
         property string request: ""
         property int expected: 0
-        environment: root.procEnv
         command: ["timeout", "60", root.python, root.archiverPath]
         stdinEnabled: true
         onStarted: {
@@ -566,7 +538,6 @@ Item {
     // Muted via the ini (BadSignalHandler/Parameters), see .qmllint.ini.
     Process {
         id: ensureDirProc
-        environment: root.procEnv
         command: ["bash", "-c", "mkdir -p \"$HOME/.config/omarchy/screen-time\"; f=\"$HOME/.config/omarchy/screen-time/history.json\"; [[ -f \"$f\" ]] || printf '{}\\n' > \"$f\""]
         onExited: historyFile.reload()
     }
@@ -592,7 +563,6 @@ Item {
     property bool backupAttempted: false
     Process {
         id: backupProc
-        environment: root.procEnv
         command: ["bash", "-c", "f=\"$HOME/.config/omarchy/screen-time/history.json\"; if [[ -s \"$f\" ]]; then if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"$f\" 2>/dev/null; then :; else mv -f \"$f\" \"$f.corrupt-$(date +%s)\"; fi; fi"]
         onExited: {
             // Unblock writes; queued state persists on the next tick.
@@ -665,10 +635,8 @@ Item {
         }
         if (root.idleService)
             root.setScreensaverActive(root.idleService.screensaverStartedThisCycle || root.idleService.screensaverWindowCount > 0);
-        if (root.lockService && root.idleService) {
+        if (root.lockService && root.idleService)
             serviceLookupTimer.stop();
-            root.serviceLookupWarned = false;
-        }
     }
 
     function setSessionLocked(locked) {
@@ -757,7 +725,6 @@ Item {
         root.switchActive();
     }
 
-    property bool serviceLookupWarned: false
     // Omarchy scopes a third-party plugin's serviceFor to its own id, so these
     // lookups never resolve there; 40 tries (10 s) then stop for good, instead
     // of a 250 ms wakeup for the shell's whole life.
@@ -774,10 +741,8 @@ Item {
             attempts++;
             if (attempts >= 40) {
                 root.serviceLookupDone = true;
-                if (!root.serviceLookupWarned) {
-                    root.serviceLookupWarned = true;
-                    console.info("kanso: omarchy.lock/omarchy.idle services not reachable from a plugin; " + "using the lock watcher (~10s pause accuracy)");
-                }
+                // once: the timer never runs again after this
+                console.info("kanso: omarchy.lock/omarchy.idle services not reachable from a plugin; " + "using the lock watcher (~10s pause accuracy)");
             }
         }
     }
@@ -790,7 +755,6 @@ Item {
     // ext-session-lock (hyprlock, swaylock).
     Process {
         id: sessionStateWatcher
-        environment: root.procEnv
         command: ["bash", "-c", "ppid=$PPID; prev=''; while :; do " + "kill -0 $ppid 2>/dev/null || exit 0; " + "cur=$(omarchy-shell lock isLocked 2>/dev/null); " + "if [ \"$cur\" = false ] && omarchy-hyprland-session-locked 2>/dev/null; then cur=true; fi; " + "if [ -n \"$cur\" ] && [ \"$cur\" != \"$prev\" ]; then printf '%s\\n' \"$cur\"; prev=\"$cur\"; fi; " + "sleep 10; done"]
         stdout: SplitParser {
             onRead: function (line) {

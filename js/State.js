@@ -1,8 +1,8 @@
 // Pure state machine: explicit inputs, fresh outputs, no side effects.
 // Service.qml owns timers, disk and processes; this owns transitions.
 
-// Model is imported by QML's import mechanism (global scope). For Node.js
-// testing, require it explicitly. The guard avoids shadowing the QML global.
+// Model: Node requires it; in QML this file gets none (null, D18), so callers
+// pass it in (state.stateModel, or the `model` argument).
 var Model =
   typeof module !== "undefined" && module && module.exports
     ? require("./Model.js")
@@ -16,15 +16,6 @@ function modelFor(state) {
 
 function isSuspendGap(now, lastTick, suspendGapMs) {
   return lastTick > 0 && now - lastTick > suspendGapMs
-}
-
-function accumulateBucket(today, app, dur) {
-  // NaN <= 0 is false, so a plain dur <= 0 check lets NaN through and
-  // poisons the day total. Only a positive finite duration accrues.
-  if (!app || !isFinite(dur) || dur <= 0) return today
-  var apps = Object.assign({}, today.apps)
-  apps[app] = (apps[app] || 0) + dur
-  return { total: today.total + dur, apps: apps }
 }
 
 // D42: the hours a day's time fell in, by local wall-clock hour (0 = 12-1 AM).
@@ -140,7 +131,61 @@ function splitAcrossDays(state, model, app, activeStart, now, todayKey) {
   return { days: d, todayDur: Math.max(0, now - cursor), resumeAt: cursor }
 }
 
-// Close the open bucket onto its start day; suspend gaps drop it.
+// Fold the open bucket's time [activeStart, now) into the days, each calendar
+// day its own share. closeActiveBucket then closes the bucket;
+// commitElapsed keeps it open from where the fold stopped (a crash loses at
+// most one interval). A suspend gap drops the time; so does a backward clock
+// jump (the start lies in the future, so no duration can be trusted), which
+// also re-anchors the baseline instead of billing nothing until the wall
+// clock catches up.
+function foldBucket(
+  state,
+  activeApp,
+  activeStart,
+  now,
+  todayKey,
+  suspendGapMs,
+  lastTick,
+  keepOpen,
+) {
+  if (!activeApp || !activeStart) return state
+  function patch(today, days, reopenAt, tick) {
+    return {
+      today: today,
+      days: days,
+      todayKey: state.todayKey,
+      activeApp: keepOpen ? activeApp : "",
+      activeStart: keepOpen ? reopenAt : 0,
+      lastTick: tick,
+    }
+  }
+  if (isSuspendGap(now, lastTick, suspendGapMs))
+    return patch(state.today, state.days, now, keepOpen ? state.lastTick : now)
+  if (now < activeStart) return patch(state.today, state.days, now, now)
+  if (Math.max(0, now - activeStart) <= 0) return state
+
+  var model = modelFor(state)
+  if (model.dayKey(new Date(activeStart)) === todayKey) {
+    var today = addSpan(state.today, activeApp, activeStart, now, model)
+    return patch(today, state.days, now, state.lastTick)
+  }
+  // Midnights crossed: history days take their shares. Closing credits today
+  // its share; an open bucket keeps it in flight, reopened at its start.
+  var split = splitAcrossDays(
+    state,
+    model,
+    activeApp,
+    activeStart,
+    now,
+    todayKey,
+  )
+  var closedToday =
+    !keepOpen && split.todayDur > 0
+      ? addSpan(state.today, activeApp, split.resumeAt, now, model)
+      : state.today
+  return patch(closedToday, split.days, split.resumeAt, state.lastTick)
+}
+
 function closeActiveBucket(
   state,
   activeApp,
@@ -150,68 +195,18 @@ function closeActiveBucket(
   suspendGapMs,
   lastTick,
 ) {
-  if (!activeApp || !activeStart) return state
-  if (isSuspendGap(now, lastTick, suspendGapMs)) {
-    return {
-      today: state.today,
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: "",
-      activeStart: 0,
-      lastTick: now,
-    }
-  }
-  // Backward clock jump: the start lies in the future, so no duration
-  // can be trusted. Drop the bucket and re-anchor the baseline instead
-  // of billing nothing until the wall clock catches up.
-  if (now < activeStart) {
-    return {
-      today: state.today,
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: "",
-      activeStart: 0,
-      lastTick: now,
-    }
-  }
-  var dur = Math.max(0, now - activeStart)
-  if (dur <= 0) return state
-
-  var model = modelFor(state)
-  var startDay = model.dayKey(new Date(activeStart))
-  if (startDay === todayKey) {
-    return {
-      today: addSpan(state.today, activeApp, activeStart, now, model),
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: "",
-      activeStart: 0,
-      lastTick: state.lastTick,
-    }
-  }
-  // Bucket spans midnights: credit each calendar day its own share.
-  var split = splitAcrossDays(
+  return foldBucket(
     state,
-    model,
     activeApp,
     activeStart,
     now,
     todayKey,
+    suspendGapMs,
+    lastTick,
+    false,
   )
-  return {
-    today:
-      split.todayDur > 0
-        ? addSpan(state.today, activeApp, split.resumeAt, now, model)
-        : state.today,
-    days: split.days,
-    todayKey: state.todayKey,
-    activeApp: "",
-    activeStart: 0,
-    lastTick: state.lastTick,
-  }
 }
 
-// Fold in-flight time in but keep the bucket open.
 function commitElapsed(
   state,
   activeApp,
@@ -221,64 +216,16 @@ function commitElapsed(
   suspendGapMs,
   lastTick,
 ) {
-  if (!activeApp || !activeStart) return state
-  if (isSuspendGap(now, lastTick, suspendGapMs)) {
-    return {
-      today: state.today,
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: activeApp,
-      activeStart: now,
-      lastTick: state.lastTick,
-    }
-  }
-  // Backward clock jump: re-anchor the open bucket instead of stalling
-  // it at zero until the wall clock catches up.
-  if (now < activeStart) {
-    return {
-      today: state.today,
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: activeApp,
-      activeStart: now,
-      lastTick: now,
-    }
-  }
-  var dur = Math.max(0, now - activeStart)
-  if (dur <= 0) return state
-
-  var model = modelFor(state)
-  var startDay = model.dayKey(new Date(activeStart))
-  if (startDay === todayKey) {
-    // Entire bucket belongs to today — simple case.
-    var newToday = addSpan(state.today, activeApp, activeStart, now, model)
-    return {
-      today: newToday,
-      days: state.days,
-      todayKey: state.todayKey,
-      activeApp: activeApp,
-      activeStart: now,
-      lastTick: state.lastTick,
-    }
-  }
-  // Midnight split: history days take their shares, today's share stays
-  // in flight with the bucket reopened at its start.
-  var split = splitAcrossDays(
+  return foldBucket(
     state,
-    model,
     activeApp,
     activeStart,
     now,
     todayKey,
+    suspendGapMs,
+    lastTick,
+    true,
   )
-  return {
-    today: state.today,
-    days: split.days,
-    todayKey: state.todayKey,
-    activeApp: activeApp,
-    activeStart: split.resumeAt,
-    lastTick: state.lastTick,
-  }
 }
 
 // Carry the live bucket into a new calendar day; null when unneeded.
@@ -406,7 +353,6 @@ function applyResolvedApp(
 if (typeof module !== "undefined" && module && module.exports) {
   module.exports = {
     isSuspendGap: isSuspendGap,
-    accumulateBucket: accumulateBucket,
     addSpan: addSpan,
     nextHourMs: nextHourMs,
     hoursOf: hoursOf,

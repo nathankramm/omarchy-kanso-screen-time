@@ -25,7 +25,7 @@ BarWidget {
     // and an old Model rejects a newer engine's card and keeps showing stale
     // numbers. Say so instead of staying silent. 0.9.0's Service has no
     // serviceVersion (undefined), so it reads as older.
-    readonly property int expectedServiceVersion: 2
+    readonly property int expectedServiceVersion: 3
     readonly property bool serviceStale: root.service !== null && root.service.serviceVersion !== root.expectedServiceVersion
     // #3: the Service won't write a history.json it can't keep whole.
     readonly property bool historyBlocked: root.service !== null && root.service.historyReadOnly === true
@@ -45,8 +45,7 @@ BarWidget {
     implicitHeight: button.implicitHeight
 
     // ---- the hover card. A passive overlay with no focus grab, so this widget
-    //      owns its life (nathan.monarch's machine, the clock and portfolio
-    //      cards' timings):
+    //      owns its life:
     //        open  after 250 ms of the button hovered;
     //        stay  while the button or the card is hovered;
     //        close 300 ms after both have left, and at once when another
@@ -113,8 +112,7 @@ BarWidget {
         function onActivePopoutChanged() {
             // Bar.requestPopout closes the old owner (whose release blanks
             // activePopout) before naming the new one: null here is that
-            // hand-off passing through, not a takeover (nathan.monarch's
-            // 2026-10-02 fix).
+            // hand-off passing through, not a takeover.
             var active = root.bar ? root.bar.activePopout : null;
             if (hoverPopup.open && active && active !== hoverPopup.coordinatorKey)
                 root.closeHoverCard();
@@ -132,17 +130,16 @@ BarWidget {
         contentWidth: hoverPopup.fittedContentWidth(hoverCard.implicitWidth + hoverPopup.padding * 2 + Border.left(hoverPopup.borderSpec) + Border.right(hoverPopup.borderSpec))
         contentHeight: hoverPopup.fittedContentHeight(hoverCard.implicitHeight)
         onOpenChanged: {
-            if (!open) {
-                // Closing the card returns it to the glance (D16) and every tab to
-                // its current page; a page run still out paints nothing (V1).
-                hoverCard.page = "glance";
-                root.pager = Pager.reset(root.pager);
-            }
-            if (!open && root.hoverState !== "closed") {
-                openTimer.stop();
-                closeTimer.stop();
-                root.hoverState = "closed";
-            }
+            if (hoverPopup.open)
+                return;
+            // Closing the card returns it to the glance (D16) and every tab to
+            // its current page; a page run still out paints nothing (V1). However it
+            // closed (a timer, IPC, another owner), the hover machine is closed too.
+            hoverCard.page = "glance";
+            root.pager = Pager.reset(root.pager);
+            openTimer.stop();
+            closeTimer.stop();
+            root.hoverState = "closed";
         }
 
         HoverCard {
@@ -233,8 +230,6 @@ BarWidget {
             else
                 root.openHoverCard();
         }
-        // One JSON line: the engine, the card, stored keys, names.json, and
-        // this bar's hover state. There is no idle state.
         // The report (D33): `copy` to the clipboard, `save` to ~/Documents.
         // (`export` is a reserved word in QML's JavaScript, so it cannot name a verb.)
         function copy(): void {
@@ -243,6 +238,8 @@ BarWidget {
         function save(): void {
             root.runReport("export");
         }
+        // One JSON line: the engine, the card, stored keys, names.json, and
+        // this bar's hover state. There is no idle state.
         function status(): string {
             var out = root.service ? root.service.status() : {
                 "service": "not running"

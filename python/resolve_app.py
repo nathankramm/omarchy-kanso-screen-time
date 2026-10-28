@@ -12,9 +12,10 @@ its subprocesses) reports the browser's screen-time app name, never the
 binary or an internal worker (zen-bin / Web Content / forkserver / …), so
 screen time aggregates per browser.
 
-Usage: resolve_app.py <terminal-pid>
+Usage: resolve_app.py [<terminal-pid>]
 Prints a single process name (basename of argv[0], falling back to comm)
-and nothing on failure.
+and nothing on failure. Without a pid it reads the active window from
+hyprctl, and a Steam window resolves to its game title instead.
 """
 
 import json
@@ -104,8 +105,7 @@ def proc_name(pid):
         pass
     # Login shells report "-bash": strip the marker so they resolve as
     # plain "bash" instead of tracking a separate "-bash" app.
-    name = name.removeprefix("-")
-    return name
+    return name.removeprefix("-")
 
 
 def _children(pid):
@@ -303,16 +303,13 @@ def main():
             raw_title = info.get("title")
             window_title = raw_title if isinstance(raw_title, str) else ""
         except (
-            ValueError,
-            json.JSONDecodeError,
+            ValueError,  # json.JSONDecodeError is one
             subprocess.SubprocessError,
             OSError,
             AttributeError,
             TypeError,
         ):
             terminal_pid = 0
-            window_class = ""
-            window_title = ""
 
     # Steam class carries the AppID: resolve via manifests, else keep the
     # stable steam_app_* key by exiting silently.
@@ -324,7 +321,7 @@ def main():
 
     # Non-Steam slugs (e.g. steam_app_battlenet) cover many games; tell them
     # apart by window title instead.
-    if _steam_class_appid(window_class) is None and _is_steam_class(window_class):
+    if _is_steam_class(window_class):
         title = window_title.strip()
         if title:
             print(title)

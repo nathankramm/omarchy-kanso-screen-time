@@ -5,6 +5,25 @@ of agx's Screen Time 1.6.2 (`2c7b75a`); its history up to then is in its
 repository:
 <https://github.com/ax1g/quickshell-screentime-plugin/blob/2c7b75a/CHANGELOG.md>.
 
+## 1.0.1 (2026-10-27)
+
+### Changed
+
+- After this update the card asks once to restart the shell ("Restart the
+  shell to finish updating"); run `omarchy restart shell`. Nothing else you
+  see changes: the card, the reports and your history are as in 1.0.0.
+
+### Docs
+
+- How to audit your screen time with `screen-time report` is now in the
+  README.
+
+### Repository
+
+- This repository now holds only the files the plugin runs, so an update
+  shows you only those. Tests, tools and CI moved to a separate development
+  repository.
+
 ## 1.0.0 (2026-10-08)
 
 ### Fixed

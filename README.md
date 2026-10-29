@@ -271,6 +271,24 @@ omarchy restart shell
 `omarchy plugin remove` asks before it deletes the plugin's folder. Your
 history in `~/.config/omarchy/screen-time/` stays until you delete it.
 
+## How this was built
+
+Kanso Screen Time started as a fork of ax1g/quickshell-screentime-plugin. I
+chose what to change and wrote the spec. Claude Code wrote most of the new
+code.
+
+It is checked in the development repository (see Development):
+
+- Unit tests for the engine and the JS model, and an independent oracle that
+  works the totals out again with separate code.
+- A mutation run: one-defect copies of the engine that must each fail the
+  oracle.
+- A CI job that runs the tracker through the real Quickshell.
+- CI runs the tests on every push, and the mutation run by hand or on a
+  release tag.
+- Before 1.0.1 and before 1.0.2, the build ran on my own machine for a day,
+  checked by a script, before it was released.
+
 ## Development
 
 Tests, the oracle and its mutation run live in a separate development

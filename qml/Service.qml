@@ -536,9 +536,15 @@ Item {
 
     // QProcess::ExitStatus never loads into lint; handlers take no args.
     // Muted via the ini (BadSignalHandler/Parameters), see .qmllint.ini.
+    // The history is private to the account: the folder is made under umask
+    // 077 and set 0700 (its parent keeps the user's umask), and on every start
+    // history.json, archive/*.json and any *.corrupt-* are set 0600, so older
+    // installs (0755/0644 under umask 022) are fixed too. A save keeps that
+    // mode: FileView's atomic write copies the old file's permissions
+    // (measured on Quickshell 0.3.2; tests/test_private_files.py).
     Process {
         id: ensureDirProc
-        command: ["bash", "-c", "mkdir -p \"$HOME/.config/omarchy/screen-time\"; f=\"$HOME/.config/omarchy/screen-time/history.json\"; [[ -f \"$f\" ]] || printf '{}\\n' > \"$f\""]
+        command: ["bash", "-c", "d=\"$HOME/.config/omarchy/screen-time\"; mkdir -p \"${d%/*}\"; (umask 077; mkdir -p \"$d\"); chmod 700 \"$d\"; [[ -d \"$d/archive\" ]] && chmod 700 \"$d/archive\"; f=\"$d/history.json\"; [[ -f \"$f\" ]] || (umask 077; printf '{}\\n' > \"$f\"); find \"$d\" -maxdepth 2 -type f \\( -path \"$d/history.json\" -o -path \"$d/archive/*.json\" -o -name '*.corrupt-*' \\) -exec chmod 600 {} +; exit 0"]
         onExited: historyFile.reload()
     }
 
@@ -559,11 +565,13 @@ Item {
     // Move aside non-empty files that fail to parse. The validity check
     // uses the system python3 (/usr/bin) when present, but the move itself never depends on
     // it: without python an unreadable file is still preserved aside
-    // instead of being overwritten on the next save.
+    // instead of being overwritten on the next save. The moved-aside copy is
+    // set 0600, and an empty 0600 history.json takes its place: the next save
+    // keeps the existing file's mode, where a new file would get the umask.
     property bool backupAttempted: false
     Process {
         id: backupProc
-        command: ["bash", "-c", "f=\"$HOME/.config/omarchy/screen-time/history.json\"; if [[ -s \"$f\" ]]; then if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"$f\" 2>/dev/null; then :; else mv -f \"$f\" \"$f.corrupt-$(date +%s)\"; fi; fi"]
+        command: ["bash", "-c", "f=\"$HOME/.config/omarchy/screen-time/history.json\"; if [[ -s \"$f\" ]]; then if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"$f\" 2>/dev/null; then :; else c=\"$f.corrupt-$(date +%s)\"; mv -f \"$f\" \"$c\" && chmod 600 \"$c\"; (umask 077; printf '{}\\n' > \"$f\"); fi; fi"]
         onExited: {
             // Unblock writes; queued state persists on the next tick.
             root.backupPending = false;

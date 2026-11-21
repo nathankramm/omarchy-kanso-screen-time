@@ -5,6 +5,15 @@ of agx's Screen Time 1.6.2 (`2c7b75a`); its history up to then is in its
 repository:
 <https://github.com/ax1g/quickshell-screentime-plugin/blob/2c7b75a/CHANGELOG.md>.
 
+## 1.0.3 (2026-11-21)
+
+### Fixed
+
+- History files are now private to your account: the
+  `~/.config/omarchy/screen-time/` folder is set to 0700, and `history.json`
+  and the archive files to 0600, so other accounts on the computer cannot
+  read them. An existing install is fixed the next time the shell starts.
+
 ## 1.0.2 (2026-10-28)
 
 ### Added

@@ -16,6 +16,10 @@ Rules (the tracker removes a day from history.json only after this confirms it):
   nothing (a crash after the archive write and before the history save is safe);
 - each year file is written atomically: a temp file in the same directory,
   fsync, then a rename. A partial file never exists under the real name;
+- the archive is private to the account: <dir> is made 0700 (an existing one
+  loses its group and other bits), and
+  each year file is 0600 from its first byte (the temp file is created 0600
+  and fchmod'ed, whatever the umask);
 - an unreadable or invalid year file is moved aside to <year>.json.corrupt-<epoch>,
   never overwritten, and a fresh one is started;
 - the last stdout line is JSON: {"archived": [keys whose year file was written]}.
@@ -28,8 +32,9 @@ import datetime
 import json
 import os
 import re
+import secrets
+import stat
 import sys
-import tempfile
 import time
 
 DAY_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -97,15 +102,19 @@ def read_year(path):
         return {}
     except (OSError, UnicodeDecodeError, ValueError):
         pass
-    os.replace(path, f"{path}.corrupt-{int(time.time())}")
+    aside = f"{path}.corrupt-{int(time.time())}"
+    os.replace(path, aside)
+    os.chmod(aside, 0o600)
     return {}
 
 
 def write_year(path, days):
     directory = os.path.dirname(path)
-    fd, tmp = tempfile.mkstemp(prefix=".archive-", suffix=".tmp", dir=directory)
+    tmp = os.path.join(directory, f".archive-{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
     try:
         with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), 0o600)
             json.dump(
                 {"schema": SCHEMA, "days": dict(sorted(days.items()))},
                 f,
@@ -129,7 +138,13 @@ def archive(directory, days):
         day = clean_day(rec)
         if is_day_key(key) and day is not None:
             by_year.setdefault(key[:4], {})[key] = day
-    os.makedirs(directory, exist_ok=True)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:  # an older 0755 archive/ becomes 0700; owner bits stay as they are
+        mode = stat.S_IMODE(os.stat(directory).st_mode)
+        if mode & 0o077:
+            os.chmod(directory, mode & 0o700)
+    except OSError as e:
+        print(f"archive_days: {directory}: {e}", file=sys.stderr)
     written, ok = [], True
     for year in sorted(by_year):
         path = os.path.join(directory, f"{year}.json")
